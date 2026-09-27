@@ -135,7 +135,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val capacity = (10 - currentCount).coerceAtLeast(0)
 
                 uris.take(capacity).forEach { uri ->
-                    decodeSampledBitmap(context, uri, 1280, 1280)?.let { bmp ->
+                    decodeSampledBitmap(context, uri, 800, 800)?.let { bmp ->
                         loadedBitmaps.add(bmp)
                     }
                 }
@@ -212,8 +212,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearAttachedBitmaps() {
+        val oldBitmaps = _attachedBitmaps.value
+        val oldSingle = _attachedBitmap.value
         _attachedBitmap.value = null
         _attachedBitmaps.value = emptyList()
+        viewModelScope.launch(Dispatchers.Default) {
+            (oldBitmaps + listOfNotNull(oldSingle)).distinct().forEach { bmp ->
+                try {
+                    if (!bmp.isRecycled) bmp.recycle()
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     fun clearAttachedBitmap() {
@@ -231,7 +240,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         val text = promptText.trim()
         val images = currentBitmaps.toList()
-        clearAttachedBitmaps()
+        _attachedBitmap.value = null
+        _attachedBitmaps.value = emptyList()
 
         val convId = _currentConversationId.value
         val primaryImage = images.firstOrNull()
@@ -322,6 +332,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             _isGenerating.value = false
             _statusMessage.value = null
+
+            // Free bitmap memory immediately
+            withContext(Dispatchers.Default) {
+                images.forEach { bmp ->
+                    try {
+                        if (!bmp.isRecycled) bmp.recycle()
+                    } catch (_: Exception) {}
+                }
+            }
 
             when (result) {
                 is AiResult.Success -> {
@@ -518,18 +537,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun setCustomBubbleImage(uri: Uri, context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val inputStream = context.contentResolver.openInputStream(uri)
-                if (inputStream != null) {
-                    val outputFile = java.io.File(context.filesDir, "custom_floating_icon_${System.currentTimeMillis()}.png")
-                    // Delete older files if any
-                    context.filesDir.listFiles { file -> file.name.startsWith("custom_floating_icon_") }?.forEach { it.delete() }
-                    
-                    val outputStream = java.io.FileOutputStream(outputFile)
-                    inputStream.copyTo(outputStream)
-                    inputStream.close()
-                    outputStream.flush()
-                    outputStream.close()
+                val outputFile = java.io.File(context.filesDir, "custom_floating_icon_${System.currentTimeMillis()}.png")
+                // Delete older files if any
+                context.filesDir.listFiles { file -> file.name.startsWith("custom_floating_icon_") }?.forEach { it.delete() }
 
+                val copied = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    java.io.FileOutputStream(outputFile).use { outputStream ->
+                        inputStream.copyTo(outputStream)
+                    }
+                    true
+                } ?: false
+
+                if (copied) {
                     adminPrefs.updateSettings(
                         bubbleCustomImagePath = outputFile.absolutePath,
                         bubbleStyle = if (adminSettings.value.bubbleStyle == "icon_only") "circle" else adminSettings.value.bubbleStyle

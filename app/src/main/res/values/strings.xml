@@ -1,4 +1,3 @@
 <resources>
     <string name="app_name">OmniAI</string>
-    <string name="accessibility_service_description">Allows OmniAI to instantly crop and capture screen areas without showing system recording dialogs.</string>
 </resources>

@@ -76,7 +76,7 @@ fun SelectedAreaCropOverlay(
             .testTag("area_crop_overlay")
     ) {
         // Draw standard user-supplied background screenshot cleanly and safely
-        backgroundImage?.let { bmp ->
+        backgroundImage?.takeIf { !it.isRecycled }?.let { bmp ->
             Image(
                 bitmap = bmp.asImageBitmap(),
                 contentDescription = "Background Screenshot",

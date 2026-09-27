@@ -43,10 +43,10 @@ class AiRepository(
             return@withContext AiResult.Error("Screen scan has been disabled by the administrator in Admin Settings.")
         }
 
-        // Collect all images (either single bitmap or list of bitmaps)
+        // Collect all images (either single bitmap or list of bitmaps), filtering out any recycled bitmaps
         val allBitmaps = when {
-            imageBitmaps.isNotEmpty() -> imageBitmaps
-            imageBitmap != null -> listOf(imageBitmap)
+            imageBitmaps.isNotEmpty() -> imageBitmaps.filter { !it.isRecycled }
+            imageBitmap != null && !imageBitmap.isRecycled -> listOf(imageBitmap)
             else -> emptyList()
         }
 
@@ -54,11 +54,15 @@ class AiRepository(
         // Reduces upload payload by ~95%, allowing instant transfer and ultra-fast Gemini OCR analysis
         val compressedImagesBase64 = if (allBitmaps.isNotEmpty()) {
             coroutineScope {
-                allBitmaps.map { bmp ->
+                allBitmaps.mapNotNull { bmp ->
                     async(Dispatchers.Default) {
-                        compressBitmapToBase64(bmp, settings.maxImageResolution)
+                        try {
+                            compressBitmapToBase64(bmp, settings.maxImageResolution).takeIf { it.isNotBlank() }
+                        } catch (_: Exception) {
+                            null
+                        }
                     }
-                }.awaitAll()
+                }.awaitAll().filterNotNull()
             }
         } else {
             emptyList()
@@ -187,36 +191,41 @@ class AiRepository(
     }
 
     private fun compressBitmapToBase64(bitmap: Bitmap, maxDim: Int): String {
-        // Use 1024 maxDim for ultra-fast network transfer & low latency without sacrificing OCR clarity
-        val targetMaxDim = if (maxDim in 480..1280) maxDim else 1024
-        var scaledBitmap = bitmap
-        val width = bitmap.width
-        val height = bitmap.height
+        if (bitmap.isRecycled) return ""
+        try {
+            // Use 1024 maxDim for ultra-fast network transfer & low latency without sacrificing OCR clarity
+            val targetMaxDim = if (maxDim in 480..1280) maxDim else 1024
+            var scaledBitmap = bitmap
+            val width = bitmap.width
+            val height = bitmap.height
 
-        if (width > targetMaxDim || height > targetMaxDim) {
-            val ratio = width.toFloat() / height.toFloat()
-            val newWidth: Int
-            val newHeight: Int
-            if (width > height) {
-                newWidth = targetMaxDim
-                newHeight = (targetMaxDim / ratio).toInt().coerceAtLeast(1)
-            } else {
-                newHeight = targetMaxDim
-                newWidth = (targetMaxDim * ratio).toInt().coerceAtLeast(1)
+            if (width > targetMaxDim || height > targetMaxDim) {
+                val ratio = width.toFloat() / height.toFloat()
+                val newWidth: Int
+                val newHeight: Int
+                if (width > height) {
+                    newWidth = targetMaxDim
+                    newHeight = (targetMaxDim / ratio).toInt().coerceAtLeast(1)
+                } else {
+                    newHeight = targetMaxDim
+                    newWidth = (targetMaxDim * ratio).toInt().coerceAtLeast(1)
+                }
+                scaledBitmap = Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
             }
-            scaledBitmap = Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
-        }
 
-        val outputStream = ByteArrayOutputStream()
-        // 75% JPEG gives sharp OCR reading with tiny ~80KB payload for instant response
-        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
-        if (scaledBitmap != bitmap) {
-            try {
-                scaledBitmap.recycle()
-            } catch (_: Exception) {}
+            val outputStream = ByteArrayOutputStream()
+            // 75% JPEG gives sharp OCR reading with tiny ~80KB payload for instant response
+            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
+            if (scaledBitmap != bitmap) {
+                try {
+                    scaledBitmap.recycle()
+                } catch (_: Exception) {}
+            }
+            val byteArray = outputStream.toByteArray()
+            return Base64.encodeToString(byteArray, Base64.NO_WRAP)
+        } catch (_: Exception) {
+            return ""
         }
-        val byteArray = outputStream.toByteArray()
-        return Base64.encodeToString(byteArray, Base64.NO_WRAP)
     }
 
     suspend fun testGemini(apiKey: String, model: String) = geminiApiClient.testConnection(apiKey, model)

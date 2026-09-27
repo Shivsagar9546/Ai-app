@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -140,7 +141,7 @@ fun FloatingPopUpView(
     onMaximize: () -> Unit,
     onClose: () -> Unit,
     onDragHeader: (dx: Float, dy: Float) -> Unit,
-    onResize: (dw: Float, dh: Float) -> Unit,
+    onResize: (dw: Float, dh: Float, dx: Float, dy: Float) -> Unit,
     onAlphaChanged: (Float) -> Unit = {},
     externalAttachedBitmap: Bitmap? = null,
     onClearExternalAttachedBitmap: () -> Unit = {}
@@ -153,67 +154,6 @@ fun FloatingPopUpView(
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
-
-    var showInAppGallery by remember { mutableStateOf(false) }
-    var localImages by remember { mutableStateOf<List<Uri>>(emptyList()) }
-    var isQueryingImages by remember { mutableStateOf(false) }
-    var imageLoadingUri by remember { mutableStateOf<Uri?>(null) }
-    val coroutineScope = rememberCoroutineScope()
-
-    LaunchedEffect(showInAppGallery) {
-        if (showInAppGallery) {
-            isQueryingImages = true
-            val uris = withContext(Dispatchers.IO) {
-                val list = mutableListOf<Uri>()
-                val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                val projection = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED)
-                val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
-                try {
-                    context.contentResolver.query(uri, projection, null, null, sortOrder)?.use { cursor ->
-                        val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-                        var count = 0
-                        while (cursor.moveToNext() && count < 60) {
-                            val id = cursor.getLong(idColumn)
-                            val contentUri = ContentUris.withAppendedId(uri, id)
-                            list.add(contentUri)
-                            count++
-                        }
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-                list
-            }
-            localImages = uris
-            isQueryingImages = false
-        }
-    }
-
-    fun loadUriAsBitmap(uri: Uri): Bitmap? {
-        return try {
-            val inputStream = context.contentResolver.openInputStream(uri)
-            val original = BitmapFactory.decodeStream(inputStream)
-            inputStream?.close()
-            original?.let { bmp ->
-                val maxDimension = 1024
-                if (bmp.width > maxDimension || bmp.height > maxDimension) {
-                    val ratio = bmp.width.toFloat() / bmp.height.toFloat()
-                    val width = if (ratio > 1) maxDimension else (maxDimension * ratio).toInt()
-                    val height = if (ratio > 1) (maxDimension / ratio).toInt() else maxDimension
-                    val scaled = Bitmap.createScaledBitmap(bmp, width, height, true)
-                    if (scaled != bmp) {
-                        bmp.recycle()
-                    }
-                    scaled
-                } else {
-                    bmp
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
-    }
 
     LaunchedEffect(externalAttachedBitmap) {
         if (externalAttachedBitmap != null) {
@@ -760,20 +700,12 @@ fun FloatingPopUpView(
                                  // 2. Gallery Photo Upload
                                 Button(
                                     onClick = {
-                                        val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                                        } else {
-                                            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                                        }
-                                        if (hasPermission) {
-                                            showInAppGallery = true
-                                        } else {
-                                            com.example.service.FloatingImagePickerActivity.launchPermissionRequest(context) { isGranted ->
-                                                if (isGranted) {
-                                                    showInAppGallery = true
-                                                } else {
-                                                    Toast.makeText(context, "Permission is required to choose photos.", Toast.LENGTH_SHORT).show()
-                                                }
+                                        com.example.service.FloatingImagePickerActivity.launchGalleryPicker(context) { bmp ->
+                                            if (attachedBitmaps.size < 4) {
+                                                attachedBitmaps = attachedBitmaps + bmp
+                                                Toast.makeText(context, "Image attached (${attachedBitmaps.size}/4)", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(context, "Maximum 4 images can be attached", Toast.LENGTH_SHORT).show()
                                             }
                                         }
                                     },
@@ -806,20 +738,12 @@ fun FloatingPopUpView(
                                 // Direct Image Attachment (+) / Photo Button from Gallery
                                 IconButton(
                                     onClick = {
-                                        val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                                        } else {
-                                            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                                        }
-                                        if (hasPermission) {
-                                            showInAppGallery = true
-                                        } else {
-                                            com.example.service.FloatingImagePickerActivity.launchPermissionRequest(context) { isGranted ->
-                                                if (isGranted) {
-                                                    showInAppGallery = true
-                                                } else {
-                                                    Toast.makeText(context, "Permission is required to choose photos.", Toast.LENGTH_SHORT).show()
-                                                }
+                                        com.example.service.FloatingImagePickerActivity.launchGalleryPicker(context) { bmp ->
+                                            if (attachedBitmaps.size < 4) {
+                                                attachedBitmaps = attachedBitmaps + bmp
+                                                Toast.makeText(context, "Image attached (${attachedBitmaps.size}/4)", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(context, "Maximum 4 images can be attached", Toast.LENGTH_SHORT).show()
                                             }
                                         }
                                     },
@@ -904,167 +828,40 @@ fun FloatingPopUpView(
                     }
                 }
 
-            // Bottom-Right Corner Resize Grip Handle
+            // Bottom-Right Corner Resize Grip Handle (Non-intrusive, leaves top buttons completely unblocked)
             Box(
                 modifier = Modifier
-                    .size(24.dp)
                     .align(Alignment.BottomEnd)
+                    .size(32.dp)
+                    .testTag("popup_resize_handle")
                     .pointerInput(Unit) {
                         detectDragGestures { change, dragAmount ->
                             change.consume()
-                            onResize(dragAmount.x, dragAmount.y)
+                            onResize(dragAmount.x, dragAmount.y, dragAmount.x / 2f, dragAmount.y / 2f)
                         }
-                    }
-                    .padding(4.dp),
+                    },
                 contentAlignment = Alignment.BottomEnd
             ) {
-                Box(
+                // Subtle diagonal grip icon for visual cue
+                Canvas(
                     modifier = Modifier
-                        .size(12.dp)
-                        .background(
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            RoundedCornerShape(bottomEnd = 4.dp, topStart = 6.dp)
-                        )
-                )
-            }
-
-            AnimatedVisibility(
-                visible = showInAppGallery,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
-                    modifier = Modifier.fillMaxSize()
+                        .size(16.dp)
+                        .padding(bottom = 4.dp, end = 4.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(12.dp)
-                    ) {
-                        // Title Bar
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PhotoLibrary,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                                Text(
-                                    text = "Select Photo",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            IconButton(
-                                onClick = { showInAppGallery = false },
-                                colors = IconButtonDefaults.iconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                )
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Close Gallery",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        if (isQueryingImages) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator()
-                            }
-                        } else if (localImages.isEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "No photos found on device.",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        } else {
-                            // Photos Grid
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(3),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                items(localImages) { uri ->
-                                    val isCurrentLoading = imageLoadingUri == uri
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(100.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                                            .clickable(enabled = imageLoadingUri == null) {
-                                                imageLoadingUri = uri
-                                                coroutineScope.launch(Dispatchers.IO) {
-                                                    val bmp = loadUriAsBitmap(uri)
-                                                    withContext(Dispatchers.Main) {
-                                                        if (bmp != null) {
-                                                            if (attachedBitmaps.size < 10) {
-                                                                attachedBitmaps = (attachedBitmaps + bmp).take(10)
-                                                                Toast.makeText(context, "Attached (${attachedBitmaps.size}/10)", Toast.LENGTH_SHORT).show()
-                                                            } else {
-                                                                Toast.makeText(context, "Maximum 10 images can be attached", Toast.LENGTH_SHORT).show()
-                                                            }
-                                                        } else {
-                                                            Toast.makeText(context, "Could not load image", Toast.LENGTH_SHORT).show()
-                                                        }
-                                                        imageLoadingUri = null
-                                                        showInAppGallery = false
-                                                    }
-                                                }
-                                            }
-                                    ) {
-                                        coil.compose.AsyncImage(
-                                            model = uri,
-                                            contentDescription = "Device Photo",
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop
-                                        )
-
-                                        if (isCurrentLoading) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .background(Color.Black.copy(alpha = 0.5f)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                CircularProgressIndicator(
-                                                    color = Color.White,
-                                                    modifier = Modifier.size(24.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    val strokeW = 2.dp.toPx()
+                    val primaryColor = androidx.compose.ui.graphics.Color(0xFF8B5CF6)
+                    drawLine(
+                        color = primaryColor.copy(alpha = 0.6f),
+                        start = androidx.compose.ui.geometry.Offset(size.width, size.height * 0.4f),
+                        end = androidx.compose.ui.geometry.Offset(size.width * 0.4f, size.height),
+                        strokeWidth = strokeW
+                    )
+                    drawLine(
+                        color = primaryColor.copy(alpha = 0.8f),
+                        start = androidx.compose.ui.geometry.Offset(size.width, size.height * 0.75f),
+                        end = androidx.compose.ui.geometry.Offset(size.width * 0.75f, size.height),
+                        strokeWidth = strokeW
+                    )
                 }
             }
         }

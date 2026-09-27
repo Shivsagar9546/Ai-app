@@ -103,6 +103,20 @@ fun AdminPanelScreen(
     var pinError by remember { mutableStateOf(false) }
 
     // Admin Config States
+    var customModelInput by remember(adminSettings.geminiModel) {
+        mutableStateOf(
+            if (adminSettings.geminiModel != "auto" &&
+                adminSettings.geminiModel != "gemini-3.5-flash" &&
+                adminSettings.geminiModel != "gemini-flash-latest" &&
+                adminSettings.geminiModel != "gemini-3.1-flash-lite-preview" &&
+                adminSettings.geminiModel != "gemini-3.1-pro-preview"
+            ) {
+                adminSettings.geminiModel
+            } else {
+                ""
+            }
+        )
+    }
     var geminiKeyInput by remember(adminSettings.geminiApiKey) { mutableStateOf(adminSettings.geminiApiKey) }
     var openAiKeyInput by remember(adminSettings.openAiApiKey) { mutableStateOf(adminSettings.openAiApiKey) }
     var poeKeyInput by remember(adminSettings.poeApiKey) { mutableStateOf(adminSettings.poeApiKey) }
@@ -468,20 +482,56 @@ fun AdminPanelScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         // Model Selector
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(text = "Model:", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
-                            FilterChip(
-                                selected = adminSettings.geminiModel == "gemini-1.5-flash",
-                                onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-1.5-flash") },
-                                label = { Text("gemini-1.5-flash (Fast)") }
-                            )
-                            FilterChip(
-                                selected = adminSettings.geminiModel == "gemini-1.5-pro",
-                                onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-1.5-pro") },
-                                label = { Text("gemini-1.5-pro (Smart)") }
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(text = "Model Presets:", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                FilterChip(
+                                    selected = adminSettings.geminiModel == "auto",
+                                    onClick = { viewModel.updateAdminSettings(geminiModel = "auto") },
+                                    label = { Text("Auto-Detect (Smart 🧠)") }
+                                )
+                                FilterChip(
+                                    selected = adminSettings.geminiModel == "gemini-3.5-flash",
+                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-3.5-flash") },
+                                    label = { Text("gemini-3.5-flash (Fast ⚡)") }
+                                )
+                                FilterChip(
+                                    selected = adminSettings.geminiModel == "gemini-flash-latest",
+                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-flash-latest") },
+                                    label = { Text("gemini-flash-latest") }
+                                )
+                                FilterChip(
+                                    selected = adminSettings.geminiModel == "gemini-3.1-pro-preview",
+                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-3.1-pro-preview") },
+                                    label = { Text("gemini-3.1-pro (Complex)") }
+                                )
+                                FilterChip(
+                                    selected = adminSettings.geminiModel == "gemini-3.1-flash-lite-preview",
+                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-3.1-flash-lite-preview") },
+                                    label = { Text("gemini-3.1-lite") }
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // Custom / Future Model Input Field
+                            OutlinedTextField(
+                                value = customModelInput,
+                                onValueChange = {
+                                    customModelInput = it
+                                    if (it.isNotBlank()) {
+                                        viewModel.updateAdminSettings(geminiModel = it.trim())
+                                    }
+                                },
+                                label = { Text("Or Type Any Custom/Future Model Name") },
+                                placeholder = { Text("e.g. gemini-3.7-pro, gemini-3.5-flash") },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                singleLine = true
                             )
                         }
 

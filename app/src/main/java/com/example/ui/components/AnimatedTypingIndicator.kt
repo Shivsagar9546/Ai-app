@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -73,19 +74,19 @@ fun AnimatedTypingIndicator(
         ) {
             Box(
                 modifier = Modifier
-                    .offset(y = dot1Offset.dp)
+                    .graphicsLayer { translationY = dot1Offset.dp.toPx() }
                     .size(7.dp)
                     .background(dotColor, CircleShape)
             )
             Box(
                 modifier = Modifier
-                    .offset(y = dot2Offset.dp)
+                    .graphicsLayer { translationY = dot2Offset.dp.toPx() }
                     .size(7.dp)
                     .background(dotColor.copy(alpha = 0.8f), CircleShape)
             )
             Box(
                 modifier = Modifier
-                    .offset(y = dot3Offset.dp)
+                    .graphicsLayer { translationY = dot3Offset.dp.toPx() }
                     .size(7.dp)
                     .background(dotColor.copy(alpha = 0.6f), CircleShape)
             )

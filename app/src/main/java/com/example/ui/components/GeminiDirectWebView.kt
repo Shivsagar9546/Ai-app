@@ -394,14 +394,21 @@ fun GeminiDirectWebView(
                                 // Handle Android intent: URIs safely
                                 if (urlStr.startsWith("intent:")) {
                                     try {
-                                        val intent = Intent.parseUri(urlStr, Intent.URI_INTENT_SCHEME)
+                                        val intent = Intent.parseUri(urlStr, Intent.URI_INTENT_SCHEME).apply {
+                                            addCategory(Intent.CATEGORY_BROWSABLE)
+                                            component = null
+                                            selector = null
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
                                         ctx.startActivity(intent)
                                     } catch (_: Exception) {}
                                     return true
                                 }
                                 // Other external schemes (mailto:, tel:, etc.)
                                 try {
-                                    val intent = Intent(Intent.ACTION_VIEW, request?.url)
+                                    val intent = Intent(Intent.ACTION_VIEW, request?.url).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
                                     ctx.startActivity(intent)
                                 } catch (_: Exception) {}
                                 return true

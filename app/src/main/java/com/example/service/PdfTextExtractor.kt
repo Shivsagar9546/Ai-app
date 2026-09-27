@@ -15,44 +15,42 @@ import java.io.FileOutputStream
 object PdfTextExtractor {
 
     suspend fun extractPdfInfo(context: Context, uri: Uri): PdfExtractResult = withContext(Dispatchers.IO) {
+        var tempFile: File? = null
+        var pfd: ParcelFileDescriptor? = null
+        var renderer: PdfRenderer? = null
         try {
             val contentResolver = context.contentResolver
-            val inputStream = contentResolver.openInputStream(uri) ?: return@withContext PdfExtractResult.Error("Could not open PDF file")
+            tempFile = File(context.cacheDir, "temp_pdf_${System.currentTimeMillis()}.pdf")
+            
+            contentResolver.openInputStream(uri)?.use { inputStream ->
+                FileOutputStream(tempFile).use { output ->
+                    inputStream.copyTo(output)
+                }
+            } ?: return@withContext PdfExtractResult.Error("Could not open PDF file")
 
-            // Copy to temp file for PdfRenderer
-            val tempFile = File(context.cacheDir, "temp_pdf_${System.currentTimeMillis()}.pdf")
-            FileOutputStream(tempFile).use { output ->
-                inputStream.copyTo(output)
-            }
-            inputStream.close()
-
-            val pfd = ParcelFileDescriptor.open(tempFile, ParcelFileDescriptor.MODE_READ_ONLY)
-            val renderer = PdfRenderer(pfd)
+            pfd = ParcelFileDescriptor.open(tempFile, ParcelFileDescriptor.MODE_READ_ONLY)
+            renderer = PdfRenderer(pfd)
             val pageCount = renderer.pageCount
 
             if (pageCount == 0) {
-                renderer.close()
-                pfd.close()
-                tempFile.delete()
                 return@withContext PdfExtractResult.Error("PDF is empty")
             }
 
             // Render first page to compact bitmap for AI vision analysis
             val page = renderer.openPage(0)
+            val pageWidth = page.width.coerceAtLeast(1)
+            val pageHeight = page.height.coerceAtLeast(1)
             val width = 1000
-            val height = (page.height * (1000f / page.width)).toInt().coerceAtMost(1600)
+            val height = ((pageHeight.toFloat() * (1000f / pageWidth)).toInt()).coerceIn(100, 1600)
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(android.graphics.Color.WHITE)
             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
             page.close()
 
-            val outputStream = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
-            val base64 = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
-
-            renderer.close()
-            pfd.close()
-            tempFile.delete()
+            val base64 = ByteArrayOutputStream().use { outputStream ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+                Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+            }
 
             PdfExtractResult.Success(
                 pageCount = pageCount,
@@ -61,6 +59,10 @@ object PdfTextExtractor {
             )
         } catch (e: Exception) {
             PdfExtractResult.Error(e.message ?: "Failed to process PDF file")
+        } finally {
+            try { renderer?.close() } catch (_: Exception) {}
+            try { pfd?.close() } catch (_: Exception) {}
+            try { tempFile?.delete() } catch (_: Exception) {}
         }
     }
 

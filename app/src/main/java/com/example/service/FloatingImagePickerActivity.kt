@@ -13,10 +13,14 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Looper
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import java.util.concurrent.atomic.AtomicBoolean
 
 @android.annotation.SuppressLint("InvalidFragmentVersionForActivityResult")
 class FloatingImagePickerActivity : ComponentActivity() {
@@ -88,30 +92,10 @@ class FloatingImagePickerActivity : ComponentActivity() {
         safeFinish()
     }
 
-    private val requestMediaPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        onPermissionResultCallback?.invoke(isGranted)
-        safeFinish()
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val mode = intent.getStringExtra(EXTRA_MODE) ?: MODE_GALLERY
         when (mode) {
-            MODE_MEDIA_PERMISSION -> {
-                val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    Manifest.permission.READ_MEDIA_IMAGES
-                } else {
-                    Manifest.permission.READ_EXTERNAL_STORAGE
-                }
-                if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) {
-                    onPermissionResultCallback?.invoke(true)
-                    safeFinish()
-                } else {
-                    requestMediaPermissionLauncher.launch(permission)
-                }
-            }
             MODE_SCREEN_CAPTURE -> {
                 try {
                     val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -215,34 +199,40 @@ class FloatingImagePickerActivity : ComponentActivity() {
     }
 
     private fun captureScreen(resultCode: Int, resultData: Intent) {
-        try {
-            val fgs = FloatingAssistantService.activeServiceInstance
-            fgs?.promoteToMediaProjectionFgs()
+        val fgs = FloatingAssistantService.activeServiceInstance
+        fgs?.promoteToMediaProjectionFgs()
 
-            val mpManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            val projection = mpManager.getMediaProjection(resultCode, resultData) ?: run {
-                Toast.makeText(this, "Screen capture permission denied", Toast.LENGTH_SHORT).show()
-                fgs?.showBubble()
-                safeFinish()
-                return
-            }
+        val mpManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+        val projection = try {
+            mpManager?.getMediaProjection(resultCode, resultData)
+        } catch (e: Exception) {
+            null
+        }
 
-            projection.registerCallback(object : android.media.projection.MediaProjection.Callback() {
-                override fun onStop() {
-                    super.onStop()
-                }
-            }, android.os.Handler(android.os.Looper.getMainLooper()))
+        if (projection == null) {
+            Toast.makeText(this, "Screen capture permission denied", Toast.LENGTH_SHORT).show()
+            fgs?.demoteFromMediaProjectionFgs()
+            fgs?.showBubble()
+            safeFinish()
+            return
+        }
 
-            val windowManager = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
-            val display = windowManager.defaultDisplay
-            val metrics = android.util.DisplayMetrics()
-            display.getRealMetrics(metrics)
-            val width = metrics.widthPixels
-            val height = metrics.heightPixels
-            val density = metrics.densityDpi
+        val windowManager = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+        val metrics = android.util.DisplayMetrics()
+        @Suppress("DEPRECATION")
+        windowManager.defaultDisplay.getRealMetrics(metrics)
+        val width = if (metrics.widthPixels > 0) metrics.widthPixels else 1080
+        val height = if (metrics.heightPixels > 0) metrics.heightPixels else 2400
+        val density = if (metrics.densityDpi > 0) metrics.densityDpi else 400
 
-            val imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
-            val virtualDisplay = projection.createVirtualDisplay(
+        val handlerThread = HandlerThread("ScreenCaptureBackground").apply { start() }
+        val backgroundHandler = Handler(handlerThread.looper)
+        val mainHandler = Handler(Looper.getMainLooper())
+
+        val imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 3)
+
+        val virtualDisplay = try {
+            projection.createVirtualDisplay(
                 "ScreenCapture",
                 width,
                 height,
@@ -250,123 +240,144 @@ class FloatingImagePickerActivity : ComponentActivity() {
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 imageReader.surface,
                 null,
-                null
-            ) ?: run {
-                projection.stop()
-                imageReader.close()
-                fgs?.demoteFromMediaProjectionFgs()
-                fgs?.showBubble()
-                Toast.makeText(this, "Virtual display setup failed", Toast.LENGTH_SHORT).show()
-                safeFinish()
-                return
-            }
+                backgroundHandler
+            )
+        } catch (e: Exception) {
+            null
+        }
 
-            val handler = android.os.Handler(android.os.Looper.getMainLooper())
-            handler.postDelayed({
-                try {
-                    val image = imageReader.acquireLatestImage()
-                    if (image != null) {
-                        val planes = image.planes
-                        val buffer = planes[0].buffer
-                        val pixelStride = planes[0].pixelStride
-                        val rowStride = planes[0].rowStride
-                        val rowPadding = rowStride - pixelStride * width
+        if (virtualDisplay == null) {
+            try { projection.stop() } catch (_: Throwable) {}
+            try { imageReader.close() } catch (_: Throwable) {}
+            try { handlerThread.quitSafely() } catch (_: Throwable) {}
+            fgs?.demoteFromMediaProjectionFgs()
+            fgs?.showBubble()
+            Toast.makeText(this, "Virtual display setup failed", Toast.LENGTH_SHORT).show()
+            safeFinish()
+            return
+        }
 
-                        val bitmap = Bitmap.createBitmap(
-                            width + rowPadding / pixelStride,
-                            height,
-                            Bitmap.Config.ARGB_8888
-                        )
-                        bitmap.copyPixelsFromBuffer(buffer)
-                        image.close()
+        val isProcessed = AtomicBoolean(false)
 
-                        val cleanBitmap = if (bitmap.width != width) {
-                            Bitmap.createBitmap(bitmap, 0, 0, width, height)
-                        } else {
-                            bitmap
-                        }
-
-                        cleanupProjection(virtualDisplay, imageReader, projection)
-                        fgs?.demoteFromMediaProjectionFgs()
-
-                        onImageSelectedCallback?.invoke(cleanBitmap)
-                        safeFinish()
-                    } else {
-                        // Retry once
-                        handler.postDelayed({
-                            try {
-                                val img2 = imageReader.acquireLatestImage()
-                                if (img2 != null) {
-                                    val planes = img2.planes
-                                    val buffer = planes[0].buffer
-                                    val pixelStride = planes[0].pixelStride
-                                    val rowStride = planes[0].rowStride
-                                    val rowPadding = rowStride - pixelStride * width
-
-                                    val bitmap = Bitmap.createBitmap(
-                                        width + rowPadding / pixelStride,
-                                        height,
-                                        Bitmap.Config.ARGB_8888
-                                    )
-                                    bitmap.copyPixelsFromBuffer(buffer)
-                                    img2.close()
-
-                                    val cleanBitmap = if (bitmap.width != width) {
-                                        Bitmap.createBitmap(bitmap, 0, 0, width, height)
-                                    } else {
-                                        bitmap
-                                    }
-
-                                    cleanupProjection(virtualDisplay, imageReader, projection)
-                                    fgs?.demoteFromMediaProjectionFgs()
-
-                                    onImageSelectedCallback?.invoke(cleanBitmap)
-                                } else {
-                                    cleanupProjection(virtualDisplay, imageReader, projection)
-                                    fgs?.demoteFromMediaProjectionFgs()
-                                    fgs?.showBubble()
-                                    Toast.makeText(this, "Screen capture timed out", Toast.LENGTH_SHORT).show()
-                                }
-                            } catch (e: Exception) {
-                                cleanupProjection(virtualDisplay, imageReader, projection)
-                                fgs?.demoteFromMediaProjectionFgs()
-                                fgs?.showBubble()
-                                Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                            } finally {
-                                safeFinish()
-                            }
-                        }, 50)
-                    }
-                } catch (e: Exception) {
-                    cleanupProjection(virtualDisplay, imageReader, projection)
+        val timeoutRunnable = Runnable {
+            if (isProcessed.compareAndSet(false, true)) {
+                cleanupProjectionSafely(virtualDisplay, imageReader, projection, backgroundHandler, handlerThread)
+                mainHandler.post {
                     fgs?.demoteFromMediaProjectionFgs()
                     fgs?.showBubble()
-                    Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@FloatingImagePickerActivity, "Screen capture timed out", Toast.LENGTH_SHORT).show()
                     safeFinish()
                 }
-            }, 150)
-
-        } catch (e: Exception) {
-            FloatingAssistantService.activeServiceInstance?.demoteFromMediaProjectionFgs()
-            Toast.makeText(this, "Screen capture setup failed: ${e.message}", Toast.LENGTH_SHORT).show()
-            safeFinish()
+            }
         }
+        backgroundHandler.postDelayed(timeoutRunnable, 2500)
+
+        val callback = object : android.media.projection.MediaProjection.Callback() {
+            override fun onStop() {
+                super.onStop()
+            }
+        }
+        try {
+            projection.registerCallback(callback, backgroundHandler)
+        } catch (_: Throwable) {}
+
+        imageReader.setOnImageAvailableListener({ reader ->
+            if (isProcessed.get()) return@setOnImageAvailableListener
+
+            val image = try {
+                reader.acquireLatestImage() ?: reader.acquireNextImage()
+            } catch (_: Throwable) {
+                null
+            } ?: return@setOnImageAvailableListener
+
+            if (!isProcessed.compareAndSet(false, true)) {
+                try { image.close() } catch (_: Throwable) {}
+                return@setOnImageAvailableListener
+            }
+
+            backgroundHandler.removeCallbacks(timeoutRunnable)
+
+            try {
+                val planes = image.planes
+                val buffer = planes[0].buffer
+                val pixelStride = planes[0].pixelStride
+                val rowStride = planes[0].rowStride
+                val rowPadding = rowStride - pixelStride * width
+
+                val bitmap = Bitmap.createBitmap(
+                    width + rowPadding / pixelStride,
+                    height,
+                    Bitmap.Config.ARGB_8888
+                )
+                bitmap.copyPixelsFromBuffer(buffer)
+                try { image.close() } catch (_: Throwable) {}
+
+                val cleanBitmap = if (bitmap.width != width) {
+                    val cropped = Bitmap.createBitmap(bitmap, 0, 0, width, height)
+                    if (cropped !== bitmap) {
+                        bitmap.recycle()
+                    }
+                    cropped
+                } else {
+                    bitmap
+                }
+
+                cleanupProjectionSafely(virtualDisplay, imageReader, projection, backgroundHandler, handlerThread)
+
+                mainHandler.post {
+                    fgs?.demoteFromMediaProjectionFgs()
+                    onImageSelectedCallback?.invoke(cleanBitmap)
+                    safeFinish()
+                }
+            } catch (t: Throwable) {
+                try { image.close() } catch (_: Throwable) {}
+                cleanupProjectionSafely(virtualDisplay, imageReader, projection, backgroundHandler, handlerThread)
+                mainHandler.post {
+                    fgs?.demoteFromMediaProjectionFgs()
+                    fgs?.showBubble()
+                    Toast.makeText(this@FloatingImagePickerActivity, "Capture processing failed: ${t.message}", Toast.LENGTH_SHORT).show()
+                    safeFinish()
+                }
+            }
+        }, backgroundHandler)
     }
 
-    private fun cleanupProjection(
+    private fun cleanupProjectionSafely(
         virtualDisplay: android.hardware.display.VirtualDisplay?,
-        imageReader: android.media.ImageReader?,
-        projection: android.media.projection.MediaProjection?
+        imageReader: ImageReader?,
+        projection: android.media.projection.MediaProjection?,
+        backgroundHandler: Handler?,
+        handlerThread: HandlerThread?
     ) {
         try {
-            virtualDisplay?.release()
-        } catch (e: Exception) {}
+            imageReader?.setOnImageAvailableListener(null, null)
+        } catch (_: Throwable) {}
         try {
-            imageReader?.close()
-        } catch (e: Exception) {}
+            virtualDisplay?.setSurface(null)
+        } catch (_: Throwable) {}
+        try {
+            virtualDisplay?.release()
+        } catch (_: Throwable) {}
         try {
             projection?.stop()
-        } catch (e: Exception) {}
+        } catch (_: Throwable) {}
+
+        // Delay closing ImageReader so the native BufferQueue producer in SurfaceFlinger
+        // cleanly completes disconnection without logging "BufferQueue has been abandoned"
+        val closeRunnable = Runnable {
+            try {
+                imageReader?.close()
+            } catch (_: Throwable) {}
+            try {
+                handlerThread?.quitSafely()
+            } catch (_: Throwable) {}
+        }
+
+        if (backgroundHandler != null && handlerThread?.isAlive == true) {
+            backgroundHandler.postDelayed(closeRunnable, 1000)
+        } else {
+            closeRunnable.run()
+        }
     }
 
     private fun scaleDownBitmap(bitmap: Bitmap, maxDim: Int): Bitmap {
@@ -389,19 +400,8 @@ class FloatingImagePickerActivity : ComponentActivity() {
         const val MODE_GALLERY = "mode_gallery"
         const val MODE_CAMERA = "mode_camera"
         const val MODE_SCREEN_CAPTURE = "mode_screen_capture"
-        const val MODE_MEDIA_PERMISSION = "mode_media_permission"
 
         private var onImageSelectedCallback: ((Bitmap) -> Unit)? = null
-        private var onPermissionResultCallback: ((Boolean) -> Unit)? = null
-
-        fun launchPermissionRequest(context: Context, onResult: (Boolean) -> Unit) {
-            onPermissionResultCallback = onResult
-            val intent = Intent(context, FloatingImagePickerActivity::class.java).apply {
-                putExtra(EXTRA_MODE, MODE_MEDIA_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
-            }
-            context.startActivity(intent)
-        }
 
         fun launchScreenCapture(context: Context, onPicked: (Bitmap) -> Unit) {
             onImageSelectedCallback = onPicked

@@ -26,12 +26,18 @@ object TtsManager {
         textToSpeech = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 isInitialized = true
-                val result = textToSpeech?.setLanguage(Locale.forLanguageTag("hi-IN"))
-                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    textToSpeech?.language = Locale.ENGLISH
+                try {
+                    val result = textToSpeech?.setLanguage(Locale.forLanguageTag("hi-IN"))
+                    if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        textToSpeech?.language = Locale.ENGLISH
+                    }
+                } catch (_: Exception) {
+                    try { textToSpeech?.language = Locale.getDefault() } catch (_: Exception) {}
                 }
-                textToSpeech?.setSpeechRate(0.95f)
-                textToSpeech?.setPitch(1.0f)
+                try {
+                    textToSpeech?.setSpeechRate(0.95f)
+                    textToSpeech?.setPitch(1.0f)
+                } catch (_: Exception) {}
 
                 textToSpeech?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
@@ -77,7 +83,13 @@ object TtsManager {
 
         _currentSpeakingId.value = id
         _isSpeaking.value = true
-        textToSpeech?.speak(cleanSpeech, TextToSpeech.QUEUE_FLUSH, null, id)
+        try {
+            textToSpeech?.speak(cleanSpeech, TextToSpeech.QUEUE_FLUSH, null, id)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error speaking text", e)
+            _isSpeaking.value = false
+            _currentSpeakingId.value = null
+        }
     }
 
     fun stop() {

@@ -31,9 +31,14 @@ class OmniAIApplication : Application() {
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             android.util.Log.e("OmniAI", "Uncaught exception on thread ${thread.name}", throwable)
             val msg = throwable.message ?: ""
+            val className = throwable.javaClass.simpleName
             val isOverlayGlitch = throwable is android.view.WindowManager.BadTokenException ||
-                    (throwable is IllegalArgumentException && (msg.contains("not attached") || msg.contains("View="))) ||
-                    (throwable is IllegalStateException && msg.contains("ActivityResultRegistryOwner"))
+                    (throwable is IllegalArgumentException && (msg.contains("not attached") || msg.contains("View=") || msg.contains("has already been added"))) ||
+                    (throwable is IllegalStateException && (msg.contains("ActivityResultRegistryOwner") || msg.contains("ForegroundService"))) ||
+                    className.contains("ForegroundService") ||
+                    className.contains("BadTokenException") ||
+                    throwable is android.os.TransactionTooLargeException ||
+                    throwable is android.os.DeadObjectException
             if (!isOverlayGlitch) {
                 defaultHandler?.uncaughtException(thread, throwable)
             }

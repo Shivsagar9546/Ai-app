@@ -192,10 +192,10 @@ fun MainChatScreen(
         }
     }
 
-    // Scroll to bottom on new message
-    LaunchedEffect(messages.size, isGenerating) {
+    // Scroll to bottom on new message smoothly
+    LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+            listState.scrollToItem(messages.size - 1)
         }
     }
 
@@ -372,12 +372,16 @@ fun MainChatScreen(
                                         }
                                     },
                                     onShare = {
-                                        val sendIntent = Intent().apply {
-                                            action = Intent.ACTION_SEND
-                                            putExtra(Intent.EXTRA_TEXT, "✨ Solution by OmniAI Assistant:\n\n${msg.text}")
-                                            type = "text/plain"
+                                        try {
+                                            val sendIntent = Intent().apply {
+                                                action = Intent.ACTION_SEND
+                                                putExtra(Intent.EXTRA_TEXT, "✨ Solution by OmniAI Assistant:\n\n${msg.text}")
+                                                type = "text/plain"
+                                            }
+                                            context.startActivity(Intent.createChooser(sendIntent, "Share solution"))
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Cannot share: ${e.message}", Toast.LENGTH_SHORT).show()
                                         }
-                                        context.startActivity(Intent.createChooser(sendIntent, "Share solution"))
                                     },
                                     onCopyText = {
                                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -819,9 +823,9 @@ private fun WelcomeHomeLayout(
 
         // Smart Prompt Starters
         val starterPrompts = listOf(
-            "Solve math problem step by step",
-            "Explain physics or chemistry concept",
-            "Translate text into Hindi & Hinglish"
+            "Ask any question, fact, or general doubt",
+            "Explain science, history, or any study topic",
+            "Write an essay, letter, or translate text"
         )
 
         starterPrompts.forEach { prompt ->

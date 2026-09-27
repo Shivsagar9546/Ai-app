@@ -84,9 +84,12 @@ class PoeApiClient {
 
                 if (!imgData.isNullOrBlank()) {
                     val contentArray = JSONArray()
-                    if (msg.text.isNotBlank()) {
-                        contentArray.put(JSONObject().put("type", "text").put("text", msg.text))
+                    val effectiveText = if (msg.text.isNotBlank()) {
+                        msg.text
+                    } else {
+                        "Please analyze this image. If there is a question or problem, solve it accurately. If the image is blank, empty, dark, or contains nothing recognizable, clearly state in Hindi/Hinglish that the image is empty or unclear."
                     }
+                    contentArray.put(JSONObject().put("type", "text").put("text", effectiveText))
                     val imgObj = JSONObject()
                     imgObj.put("type", "image_url")
                     val urlObj = JSONObject()
@@ -115,19 +118,20 @@ class PoeApiClient {
                 .post(requestBody)
                 .build()
 
-            val response = client.newCall(request).execute()
-            val responseString = response.body?.string() ?: ""
+            val (responseCode, responseSuccessful, responseString) = client.newCall(request).execute().use { response ->
+                Triple(response.code, response.isSuccessful, response.body?.string() ?: "")
+            }
 
-            if (!response.isSuccessful) {
+            if (!responseSuccessful) {
                 val errorMsg = try {
                     val errJson = JSONObject(responseString)
-                    errJson.optJSONObject("error")?.optString("message") ?: "HTTP ${response.code}: $responseString"
+                    errJson.optJSONObject("error")?.optString("message") ?: "HTTP $responseCode: $responseString"
                 } catch (e: Exception) {
-                    "HTTP ${response.code}: $responseString"
+                    "HTTP $responseCode: $responseString"
                 }
                 return@withContext AiResult.Error(
                     errorMsg,
-                    isQuotaOrKeyError = response.code == 401 || response.code == 429
+                    isQuotaOrKeyError = responseCode == 401 || responseCode == 429
                 )
             }
 
@@ -177,10 +181,11 @@ class PoeApiClient {
                 .get()
                 .build()
 
-            val response = client.newCall(request).execute()
-            val responseString = response.body?.string() ?: ""
+            val (isSuccessful, responseString) = client.newCall(request).execute().use { response ->
+                Pair(response.isSuccessful, response.body?.string() ?: "")
+            }
 
-            if (response.isSuccessful) {
+            if (isSuccessful) {
                 val json = JSONObject(responseString)
                 val data = json.optJSONArray("data")
                 if (data != null) {

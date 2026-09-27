@@ -383,61 +383,72 @@ fun formatMathSymbols(raw: String): String {
         .replace("\\right", "")
 }
 
+private val BOLD_REGEX = Regex("\\*\\*(.*?)\\*\\*")
+private val CODE_REGEX = Regex("`(.*?)`")
+private val INLINE_MATH_REGEX = Regex("\\$(.*?)\\$")
+
 @Composable
-fun parseInlineMarkdown(text: String, defaultColor: Color) = buildAnnotatedString {
-    val boldRegex = Regex("\\*\\*(.*?)\\*\\*")
-    val codeRegex = Regex("`(.*?)`")
-    val inlineMathRegex = Regex("\\$(.*?)\\$")
+fun parseInlineMarkdown(text: String, defaultColor: Color): androidx.compose.ui.text.AnnotatedString {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val primaryContainerColor = MaterialTheme.colorScheme.primaryContainer
+    return remember(text, defaultColor, primaryColor, primaryContainerColor) {
+        try {
+            buildAnnotatedString {
+                var remaining = text
+                while (remaining.isNotEmpty()) {
+                    val boldMatch = BOLD_REGEX.find(remaining)
+                    val codeMatch = CODE_REGEX.find(remaining)
+                    val mathMatch = INLINE_MATH_REGEX.find(remaining)
 
-    var remaining = text
-    while (remaining.isNotEmpty()) {
-        val boldMatch = boldRegex.find(remaining)
-        val codeMatch = codeRegex.find(remaining)
-        val mathMatch = inlineMathRegex.find(remaining)
+                    val nextMatch = listOfNotNull(boldMatch, codeMatch, mathMatch).minByOrNull { it.range.first }
 
-        val nextMatch = listOfNotNull(boldMatch, codeMatch, mathMatch).minByOrNull { it.range.first }
+                    if (nextMatch == null) {
+                        append(remaining)
+                        break
+                    }
 
-        if (nextMatch == null) {
-            append(remaining)
-            break
-        }
+                    val start = nextMatch.range.first
+                    val end = nextMatch.range.last + 1
 
-        val start = nextMatch.range.first
-        val end = nextMatch.range.last + 1
+                    if (start > 0) {
+                        append(remaining.substring(0, start))
+                    }
 
-        if (start > 0) {
-            append(remaining.substring(0, start))
-        }
+                    if (nextMatch == boldMatch && boldMatch.groupValues.size > 1) {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = defaultColor)) {
+                            append(boldMatch.groupValues[1])
+                        }
+                    } else if (nextMatch == codeMatch && codeMatch.groupValues.size > 1) {
+                        withStyle(
+                            SpanStyle(
+                                fontFamily = FontFamily.Monospace,
+                                background = Color(0x336366F1),
+                                fontWeight = FontWeight.SemiBold,
+                                color = primaryColor
+                            )
+                        ) {
+                            append(" ${codeMatch.groupValues[1]} ")
+                        }
+                    } else if (nextMatch == mathMatch && mathMatch.groupValues.size > 1) {
+                        val formula = formatMathSymbols(mathMatch.groupValues[1])
+                        withStyle(
+                            SpanStyle(
+                                fontFamily = FontFamily.Monospace,
+                                background = primaryContainerColor.copy(alpha = 0.4f),
+                                fontWeight = FontWeight.Bold,
+                                color = primaryColor
+                            )
+                        ) {
+                            append(" $formula ")
+                        }
+                    }
 
-        if (nextMatch == boldMatch) {
-            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = defaultColor)) {
-                append(boldMatch.groupValues[1])
+                    val advance = if (end > start) end else (start + 1).coerceAtMost(remaining.length)
+                    remaining = remaining.substring(advance)
+                }
             }
-        } else if (nextMatch == codeMatch) {
-            withStyle(
-                SpanStyle(
-                    fontFamily = FontFamily.Monospace,
-                    background = Color(0x336366F1),
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            ) {
-                append(" ${codeMatch.groupValues[1]} ")
-            }
-        } else if (nextMatch == mathMatch) {
-            val formula = formatMathSymbols(mathMatch.groupValues[1])
-            withStyle(
-                SpanStyle(
-                    fontFamily = FontFamily.Monospace,
-                    background = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            ) {
-                append(" $formula ")
-            }
+        } catch (_: Exception) {
+            androidx.compose.ui.text.AnnotatedString(text)
         }
-
-        remaining = remaining.substring(end)
     }
 }

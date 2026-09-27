@@ -41,6 +41,7 @@ object AppRoutes {
 class MainActivity : ComponentActivity() {
 
     private val viewModel: ChatViewModel by viewModels()
+    private val navTargetState = androidx.compose.runtime.mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,6 +53,7 @@ class MainActivity : ComponentActivity() {
         if (!initialConvId.isNullOrBlank()) {
             viewModel.selectConversation(initialConvId)
         }
+        navTargetState.value = initialNavTarget
 
         setContent {
             val adminSettings by viewModel.adminSettings.collectAsState()
@@ -65,7 +67,8 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     OmniAIAppNavigation(
                         viewModel = viewModel,
-                        initialNavTarget = initialNavTarget
+                        navTarget = navTargetState.value,
+                        onNavTargetConsumed = { navTargetState.value = null }
                     )
                 }
             }
@@ -79,21 +82,28 @@ class MainActivity : ComponentActivity() {
         if (!convId.isNullOrBlank()) {
             viewModel.selectConversation(convId)
         }
+        val target = intent.getStringExtra("NAV_TARGET")
+        if (!target.isNullOrBlank()) {
+            navTargetState.value = target
+        }
     }
 }
 
 @Composable
 fun OmniAIAppNavigation(
     viewModel: ChatViewModel,
-    initialNavTarget: String?
+    navTarget: String?,
+    onNavTargetConsumed: () -> Unit
 ) {
     val navController = rememberNavController()
 
-    LaunchedEffect(initialNavTarget) {
-        if (initialNavTarget == "settings") {
-            navController.navigate(AppRoutes.SETTINGS)
-        } else if (initialNavTarget == "floating_hub") {
-            navController.navigate(AppRoutes.FLOATING_HUB)
+    LaunchedEffect(navTarget) {
+        if (!navTarget.isNullOrBlank()) {
+            when (navTarget) {
+                "settings" -> navController.navigate(AppRoutes.SETTINGS)
+                "floating_hub", "assistant_hub" -> navController.navigate(AppRoutes.FLOATING_HUB)
+            }
+            onNavTargetConsumed()
         }
     }
 

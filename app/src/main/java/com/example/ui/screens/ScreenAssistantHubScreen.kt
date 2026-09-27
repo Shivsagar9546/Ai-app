@@ -126,7 +126,7 @@ fun ScreenAssistantHubScreen(
 ) {
     val context = LocalContext.current
     var hasOverlayPermission by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
-    var isServiceRunning by remember { mutableStateOf(FloatingAssistantService.isRunning()) }
+    val isServiceRunning by FloatingAssistantService.isRunningFlow.collectAsState()
 
     val adminSettings by viewModel.adminSettings.collectAsState()
 
@@ -149,7 +149,6 @@ fun ScreenAssistantHubScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 hasOverlayPermission = Settings.canDrawOverlays(context)
-                isServiceRunning = FloatingAssistantService.isRunning()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -256,24 +255,27 @@ fun ScreenAssistantHubScreen(
                                         requestOverlayPermission(context)
                                     } else {
                                         try {
-                                            val intent = Intent(context, FloatingAssistantService::class.java)
+                                            val intent = Intent(context, FloatingAssistantService::class.java).apply {
+                                                action = FloatingAssistantService.ACTION_SHOW_BUBBLE
+                                            }
                                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                                                 context.startForegroundService(intent)
                                             } else {
                                                 context.startService(intent)
                                             }
-                                            isServiceRunning = true
-                                            Toast.makeText(context, "Floating Assistant Bubble started! Check your screen.", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "Floating Assistant Bubble started!", Toast.LENGTH_SHORT).show()
                                         } catch (e: Exception) {
                                             Toast.makeText(context, "Failed to start service: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                                         }
                                     }
                                 } else {
                                     try {
-                                        val intent = Intent(context, FloatingAssistantService::class.java)
+                                        val intent = Intent(context, FloatingAssistantService::class.java).apply {
+                                            action = FloatingAssistantService.ACTION_STOP_SERVICE
+                                        }
+                                        context.startService(intent)
                                         context.stopService(intent)
                                     } catch (e: Exception) {}
-                                    isServiceRunning = false
                                 }
                             },
                             colors = SwitchDefaults.colors(
@@ -793,13 +795,14 @@ fun ScreenAssistantHubScreen(
                         requestOverlayPermission(context)
                     } else {
                         try {
-                            val intent = Intent(context, FloatingAssistantService::class.java)
+                            val intent = Intent(context, FloatingAssistantService::class.java).apply {
+                                action = FloatingAssistantService.ACTION_SHOW_BUBBLE
+                            }
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                                 context.startForegroundService(intent)
                             } else {
                                 context.startService(intent)
                             }
-                            isServiceRunning = true
                             Toast.makeText(context, "Floating Assistant Bubble launched with custom style!", Toast.LENGTH_SHORT).show()
                         } catch (e: Exception) {
                             Toast.makeText(context, "Failed to start service: ${e.localizedMessage}", Toast.LENGTH_LONG).show()

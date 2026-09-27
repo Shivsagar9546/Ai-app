@@ -54,13 +54,21 @@ class GeminiApiClient {
             else -> emptyList()
         }
 
-        // Fast priority models according to current Gemini API standards: gemini-1.5-flash is the speed king
-        val requestedModel = if (model.isNotBlank()) model else "gemini-1.5-flash"
+        // Smart Adaptive Model Routing & Modern fallbacks (avoiding deprecated gemini-1.5 models)
+        val latestUserQuery = messages.lastOrNull { it.role.equals("user", ignoreCase = true) }?.text ?: ""
+        val resolvedModel = if (model == "auto" || model.isBlank()) {
+            autoSelectModel(latestUserQuery, hasImages = allImages.isNotEmpty())
+        } else {
+            model
+        }
+
+        val requestedModel = if (resolvedModel.isNotBlank()) resolvedModel else "gemini-3.5-flash"
         val modelsToTry = mutableListOf<String>().apply {
             add(requestedModel)
-            if (requestedModel != "gemini-1.5-flash") add("gemini-1.5-flash")
-            if (requestedModel != "gemini-1.5-pro") add("gemini-1.5-pro")
-            if (requestedModel != "gemini-2.0-flash-exp") add("gemini-2.0-flash-exp")
+            if (requestedModel != "gemini-3.5-flash") add("gemini-3.5-flash")
+            if (requestedModel != "gemini-flash-latest") add("gemini-flash-latest")
+            if (requestedModel != "gemini-3.1-pro-preview") add("gemini-3.1-pro-preview")
+            if (requestedModel != "gemini-3.1-flash-lite-preview") add("gemini-3.1-flash-lite-preview")
         }.distinct()
 
         var lastErrorMsg = "Unable to reach Gemini servers."
@@ -86,11 +94,6 @@ class GeminiApiClient {
                     val contentObj = JSONObject()
                     val isUser = msg.role.equals("user", ignoreCase = true)
                     contentObj.put("role", if (isUser) "user" else "model")
-
-                    val partsArray = JSONArray()
-                    if (msg.text.isNotBlank()) {
-                        partsArray.put(JSONObject().put("text", msg.text))
-                    }
 
                     // Attach images for this message
                     val messageImages = if (index == messages.lastIndex) {
@@ -127,6 +130,18 @@ class GeminiApiClient {
                         }
                     }
 
+                    val partsArray = JSONArray()
+                    val effectiveText = if (msg.text.isNotBlank()) {
+                        msg.text
+                    } else if (isUser && resolvedImages.isNotEmpty()) {
+                        "Please examine the attached image carefully:\n1. If the image is empty, blank, dark, blurry, or contains no readable text, question, or clear subject, politely respond in simple Hindi/Hinglish: 'इस इमेज में कोई स्पष्ट प्रश्न या कंटेंट दिखाई नहीं दे रहा है। कृपया किसी प्रश्न या विषय की साफ़ फोटो अपलोड करें या बताएं कि मैं आपकी क्या मदद कर सकता हूँ।'\n2. Answer or explain whatever is in the image according to its real topic (science, general, history, biology, notes, coding, art, etc.). Do NOT force mathematical formatting or equations unless the image actually contains math or numbers.\n3. Keep the explanation natural, clear, accurate, and easy to understand in Hindi/Hinglish."
+                    } else {
+                        ""
+                    }
+                    if (effectiveText.isNotBlank()) {
+                        partsArray.put(JSONObject().put("text", effectiveText))
+                    }
+
                     resolvedImages.forEach { imgData ->
                         if (imgData.isNotBlank()) {
                             val inlineDataObj = JSONObject()
@@ -154,18 +169,19 @@ class GeminiApiClient {
 
                 rootJson.put("contents", contentsArray)
 
-                // Generation config: Low temperature for direct, fast and accurate responses
+                // Generation config: Low temperature for direct, fast, accurate responses without hallucinations
                 val genConfig = JSONObject()
                 genConfig.put("temperature", 0.1)
-                genConfig.put("maxOutputTokens", 1024)
+                genConfig.put("topP", 0.85)
+                genConfig.put("maxOutputTokens", 4096)
 
                 rootJson.put("generationConfig", genConfig)
 
-                // If web search is enabled, add googleSearchRetrieval tool for real-time grounding
+                // If web search is enabled, add google_search_retrieval tool for real-time grounding
                 if (isWebSearchEnabled) {
                     val toolsArray = JSONArray()
                     val googleSearchObj = JSONObject()
-                    googleSearchObj.put("googleSearchRetrieval", JSONObject())
+                    googleSearchObj.put("google_search_retrieval", JSONObject())
                     toolsArray.put(googleSearchObj)
                     rootJson.put("tools", toolsArray)
                 }
@@ -176,20 +192,21 @@ class GeminiApiClient {
                     .post(requestBody)
                     .build()
 
-                val response = client.newCall(request).execute()
-                val responseString = response.body?.string() ?: ""
+                val (responseCode, responseString) = client.newCall(request).execute().use { resp ->
+                    Pair(resp.code, resp.body?.string() ?: "")
+                }
 
-                if (!response.isSuccessful) {
+                if (responseCode !in 200..299) {
                     val errorMsg = try {
                         val errorJson = JSONObject(responseString)
-                        errorJson.optJSONObject("error")?.optString("message") ?: "HTTP ${response.code}: $responseString"
+                        errorJson.optJSONObject("error")?.optString("message") ?: "HTTP $responseCode: $responseString"
                     } catch (e: Exception) {
-                        "HTTP ${response.code}: $responseString"
+                        "HTTP $responseCode: $responseString"
                     }
                     lastErrorMsg = errorMsg
                     
-                    val isKeyError = response.code == 401 || response.code == 403
-                    val isQuotaError = response.code == 429
+                    val isKeyError = responseCode == 401 || responseCode == 403
+                    val isQuotaError = responseCode == 429
                     isQuotaOrKey = isKeyError || isQuotaError
 
                     // Try next model if this is a model error (like 404/400) or high demand/overload
@@ -269,6 +286,49 @@ class GeminiApiClient {
         }
 
         return@withContext AiResult.Error(lastErrorMsg, isQuotaOrKeyError = isQuotaOrKey)
+    }
+
+    private fun autoSelectModel(userPrompt: String, hasImages: Boolean = false): String {
+        if (hasImages) {
+            return "gemini-3.5-flash"
+        }
+        val text = userPrompt.lowercase().trim()
+        
+        // Define lists of indicators for complex or mathematical topics
+        val complexOrMathKeywords = listOf(
+            "solve", "equation", "math", "calculus", "derivative", "matrix", "integral", "geometry",
+            "trigonometry", "algebra", "sin", "cos", "tan", "theta", "θ", "fraction", "formula",
+            "proof", "theorem", "मान ज्ञात", "समीकरण", "गणित", "हल करें", "मान निकालें", "गुणनखंड"
+        )
+        
+        // Define indicators for programming or coding questions
+        val codingKeywords = listOf(
+            "code", "program", "function", "write a class", "database", "sql", "html", "css",
+            "javascript", "java", "kotlin", "python", "c++", "c#", "rust", "compile", "bug", "error in line",
+            "syntax", "api", "json", "xml", "git", "github", "कोडिंग", "प्रोग्राम"
+        )
+        
+        // Define common short greetings or simple questions
+        val simpleKeywords = listOf(
+            "hi", "hello", "hey", "hola", "greetings", "good morning", "good evening",
+            "how are you", "who are you", "who made you", "what is your name", "नमस्ते", "हैलो", "कैसे हो", "कौन हो"
+        )
+
+        val hasComplexKeyword = complexOrMathKeywords.any { text.contains(it) }
+        val hasCodingKeyword = codingKeywords.any { text.contains(it) }
+        val isVeryLongQuery = text.split("\\s+".toRegex()).size > 80 // Long detailed prompts
+        
+        return when {
+            hasComplexKeyword || hasCodingKeyword || isVeryLongQuery -> {
+                "gemini-3.1-pro-preview"
+            }
+            simpleKeywords.any { text == it || text.startsWith(it + " ") || text.endsWith(" " + it) } || text.split("\\s+".toRegex()).size < 5 -> {
+                "gemini-3.1-flash-lite-preview"
+            }
+            else -> {
+                "gemini-3.5-flash"
+            }
+        }
     }
 
     suspend fun testConnection(apiKey: String, model: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
