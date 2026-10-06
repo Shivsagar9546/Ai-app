@@ -179,8 +179,6 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         updateScreenDimensions()
         activeServiceInstance = this
 
-        // Under Android 15, we must show the visible overlay window BEFORE starting foreground service to satisfy SYSTEM_ALERT_WINDOW background start rules.
-        showBubble()
         startForegroundServiceNotification()
     }
 
@@ -213,7 +211,25 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         }
     }
 
+    private fun ensureNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = android.app.NotificationChannel(
+                OmniAIApplication.CHANNEL_FLOATING_SERVICE,
+                "Floating Assistant Service",
+                android.app.NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Silent internal channel for background overlay service"
+                setShowBadge(false)
+                enableLights(false)
+                enableVibration(false)
+            }
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            nm.createNotificationChannel(channel)
+        }
+    }
+
     private fun startForegroundServiceNotification() {
+        ensureNotificationChannel()
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -344,16 +360,20 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         try {
             viewToRemove.visibility = View.GONE
         } catch (e: Exception) {}
-        viewToRemove.post {
-            try {
-                if (viewToRemove.isAttachedToWindow) {
-                    windowManager.removeView(viewToRemove)
-                }
-            } catch (e: Exception) {
-                try {
-                    windowManager.removeViewImmediate(viewToRemove)
-                } catch (e2: Exception) {}
+        try {
+            if (viewToRemove.isAttachedToWindow) {
+                windowManager.removeView(viewToRemove)
             }
+        } catch (e: Exception) {
+            try {
+                viewToRemove.post {
+                    try {
+                        if (viewToRemove.isAttachedToWindow) {
+                            windowManager.removeView(viewToRemove)
+                        }
+                    } catch (ex: Exception) {}
+                }
+            } catch (ex: Exception) {}
         }
     }
 
@@ -406,19 +426,20 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         hideOcrGrabber()
         hideQuickHud()
 
-        if (bubbleView != null) {
+        val existing = bubbleView
+        if (existing != null) {
             try {
-                if (bubbleView?.isAttachedToWindow == true) {
-                    bubbleView?.visibility = View.VISIBLE
-                    windowManager.updateViewLayout(bubbleView, bubbleParams)
-                    return
+                existing.visibility = View.VISIBLE
+                if (existing.isAttachedToWindow) {
+                    windowManager.updateViewLayout(existing, bubbleParams)
                 }
+                return
             } catch (e: Exception) {
                 try {
-                    windowManager.removeViewImmediate(bubbleView)
+                    safelyRemoveView(existing)
                 } catch (ex: Exception) {}
+                bubbleView = null
             }
-            bubbleView = null
         }
 
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -440,7 +461,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             y = screenHeight / 3
         }
 
-        bubbleView = ComposeView(this).apply {
+        val newBubbleView = ComposeView(this).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setViewTreeLifecycleOwner(this@FloatingAssistantService)
             setViewTreeSavedStateRegistryOwner(this@FloatingAssistantService)
@@ -530,8 +551,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             }
         }
 
+        bubbleView = newBubbleView
         try {
-            windowManager.addView(bubbleView, bubbleParams)
+            windowManager.addView(newBubbleView, bubbleParams)
         } catch (e: Exception) {
             Toast.makeText(this, "Failed to display floating bubble: ${e.message}", Toast.LENGTH_SHORT).show()
         }
@@ -630,14 +652,18 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         onQuickHud = {
                             startQuickHudSolve(null)
                         },
-                        onPickGalleryImage = { callback ->
+                        onPickGalleryImage = {
+                            popupView?.visibility = View.GONE
                             FloatingImagePickerActivity.launchGalleryPicker(this@FloatingAssistantService) { bitmap ->
-                                callback(bitmap)
+                                _attachedImage.value = bitmap
+                                showPopup()
                             }
                         },
-                        onTakePhoto = { callback ->
+                        onTakePhoto = {
+                            popupView?.visibility = View.GONE
                             FloatingImagePickerActivity.launchCameraPicker(this@FloatingAssistantService) { bitmap ->
-                                callback(bitmap)
+                                _attachedImage.value = bitmap
+                                showPopup()
                             }
                         },
                         onVoiceInput = {
@@ -1001,7 +1027,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             captureScreenshotHelper { fullBitmap ->
                 val targetBmp = if (cropRect != null) {
                     val cropped = cropBitmap(fullBitmap, cropRect)
-                    fullBitmap.recycle()
+                    if (fullBitmap !== cropped && !fullBitmap.isRecycled) {
+                        fullBitmap.recycle()
+                    }
                     cropped
                 } else {
                     fullBitmap
@@ -1017,7 +1045,15 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                     val result = aiRepository.askAi(
                         messages = messages,
                         imageBitmap = targetBmp,
-                        isScreenScan = true
+                        isScreenScan = true,
+                        onChunk = { chunk ->
+                            serviceScope.launch(Dispatchers.Main) {
+                                _isHudLoading.value = false
+                                val current = _hudSolutionText.value ?: ""
+                                val clean = if (current.startsWith("Analyzing screen")) "" else current
+                                _hudSolutionText.value = clean + chunk
+                            }
+                        }
                     )
                     targetBmp.recycle()
                     
@@ -1191,7 +1227,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             captureScreenshotHelper { fullBitmap ->
                 val targetBmp = if (cropRect != null) {
                     val cropped = cropBitmap(fullBitmap, cropRect)
-                    fullBitmap.recycle()
+                    if (fullBitmap !== cropped && !fullBitmap.isRecycled) {
+                        fullBitmap.recycle()
+                    }
                     cropped
                 } else {
                     fullBitmap

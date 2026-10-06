@@ -43,6 +43,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import com.example.util.receiveImageContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -51,6 +52,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
@@ -141,14 +143,21 @@ fun MainChatScreen(
     val isGenerating by viewModel.isGenerating.collectAsState()
     val attachedBitmap by viewModel.attachedBitmap.collectAsState()
     val attachedBitmaps by viewModel.attachedBitmaps.collectAsState()
+    val streamingText by viewModel.streamingText.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
     val adminSettings by viewModel.adminSettings.collectAsState()
     val isListening by viewModel.voiceHelper.isListening.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     var showAttachmentMenu by remember { mutableStateOf(false) }
+    var hasClipboardScreenshot by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+
+    // Check clipboard for screenshot/image on entry & whenever attachedBitmaps changes
+    LaunchedEffect(attachedBitmaps.size) {
+        hasClipboardScreenshot = com.example.util.ClipboardImageHelper.hasImageInClipboard(context)
+    }
 
     val ttsSpeakingId by TtsManager.currentSpeakingId.collectAsState()
     val isTtsSpeaking by TtsManager.isSpeaking.collectAsState()
@@ -192,10 +201,11 @@ fun MainChatScreen(
         }
     }
 
-    // Scroll to bottom on new message smoothly
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.scrollToItem(messages.size - 1)
+    // Scroll to bottom on new message or streaming chunk smoothly
+    LaunchedEffect(messages.size, streamingText) {
+        val count = messages.size + if (!streamingText.isNullOrBlank()) 1 else 0
+        if (count > 0) {
+            listState.scrollToItem(count - 1)
         }
     }
 
@@ -397,17 +407,39 @@ fun MainChatScreen(
 
                             if (isGenerating) {
                                 item {
-                                    Row(
-                                        modifier = Modifier.padding(start = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        AnimatedTypingIndicator()
-                                        Text(
-                                            text = "OmniAI is thinking...",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    if (!streamingText.isNullOrBlank()) {
+                                        ChatMessageCard(
+                                            message = com.example.data.local.ChatMessage(
+                                                id = -1,
+                                                conversationId = "",
+                                                role = "model",
+                                                text = streamingText ?: "",
+                                                timestamp = System.currentTimeMillis()
+                                            ),
+                                            isSpeaking = false,
+                                            onSpeak = {},
+                                            onShare = {},
+                                            onCopyText = {
+                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                val clip = ClipData.newPlainText("AI Message", streamingText ?: "")
+                                                clipboard.setPrimaryClip(clip)
+                                                Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                                            },
+                                            onRegenerate = {}
                                         )
+                                    } else {
+                                        Row(
+                                            modifier = Modifier.padding(start = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            AnimatedTypingIndicator()
+                                            Text(
+                                                text = "OmniAI is thinking...",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -513,6 +545,66 @@ fun MainChatScreen(
                     )
                 }
 
+                // ChatGPT-style Smart Screenshot / Clipboard Paste Suggestion Bar
+                AnimatedVisibility(
+                    visible = hasClipboardScreenshot && attachedBitmaps.isEmpty(),
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Surface(
+                            onClick = {
+                                viewModel.pasteFromClipboard()
+                                hasClipboardScreenshot = false
+                            },
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                            ),
+                            tonalElevation = 2.dp,
+                            modifier = Modifier.testTag("paste_clipboard_screenshot_chip")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentPaste,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Paste Screenshot / Image 🖼️",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { hasClipboardScreenshot = false },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Dismiss paste banner",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+
                 // Bottom Input & Controls Dock (ChatGPT-Style)
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
@@ -530,7 +622,10 @@ fun MainChatScreen(
                     ) {
                         // ChatGPT '+' Attachment Button
                         Surface(
-                            onClick = { showAttachmentMenu = true },
+                            onClick = { 
+                                hasClipboardScreenshot = com.example.util.ClipboardImageHelper.hasImageInClipboard(context)
+                                showAttachmentMenu = true 
+                            },
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.surfaceVariant,
                             modifier = Modifier
@@ -547,7 +642,7 @@ fun MainChatScreen(
                             }
                         }
 
-                        // Spacious ChatGPT-Style Text Input Pill
+                        // Spacious ChatGPT-Style Text Input Pill with Native Rich Content / Keyboard Paste
                         OutlinedTextField(
                             value = inputText,
                             onValueChange = { inputText = it },
@@ -560,6 +655,9 @@ fun MainChatScreen(
                             },
                             modifier = Modifier
                                 .weight(1f)
+                                .receiveImageContent { clipData ->
+                                    viewModel.attachClipData(clipData)
+                                }
                                 .testTag("main_chat_input"),
                             shape = RoundedCornerShape(26.dp),
                             maxLines = 5,
@@ -655,7 +753,8 @@ fun MainChatScreen(
                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                 )
             },
-            onPdfClick = { pdfLauncher.launch("application/pdf") }
+            onPdfClick = { pdfLauncher.launch("application/pdf") },
+            onPasteClipboardClick = { viewModel.pasteFromClipboard() }
         )
     }
 }

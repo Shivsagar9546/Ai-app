@@ -23,7 +23,8 @@ class AiRepository(
         imageBitmap: Bitmap? = null,
         imageBitmaps: List<Bitmap> = emptyList(),
         isScreenScan: Boolean = false,
-        systemPromptOverride: String? = null
+        systemPromptOverride: String? = null,
+        onChunk: ((String) -> Unit)? = null
     ): AiResult = withContext(Dispatchers.IO) {
         val settings = adminPreferencesRepository.getSettings()
         val advanced = com.example.data.preferences.AdvancedSettingsHelper(adminPreferencesRepository.context)
@@ -50,7 +51,7 @@ class AiRepository(
             else -> emptyList()
         }
 
-        // Fast parallel image compression: 1024px maximum dimension with 75% JPEG quality
+        // Fast parallel image compression: 800px maximum dimension with 75% JPEG quality
         // Reduces upload payload by ~95%, allowing instant transfer and ultra-fast Gemini OCR analysis
         val compressedImagesBase64 = if (allBitmaps.isNotEmpty()) {
             coroutineScope {
@@ -122,32 +123,21 @@ class AiRepository(
                 imageInlineBase64 = firstImageBase64
             )
         } else {
-            // Try Gemini keys in sequence for automatic key rotation failover
+            // Try Gemini with ultra-fast streaming first if callback provided
             for (keyToTry in geminiKeys) {
-                val geminiResult = geminiApiClient.generateContent(
-                    apiKeyOverride = keyToTry.ifBlank { null },
-                    model = settings.geminiModel,
-                    systemPrompt = sysPrompt,
-                    messages = messages,
-                    imageInlineBase64 = firstImageBase64,
-                    imagesInlineBase64 = compressedImagesBase64,
-                    isWebSearchEnabled = settings.isWebSearchEnabled
-                )
-                if (geminiResult is AiResult.Success) {
-                    finalResult = geminiResult
-                    break
+                val geminiResult = if (onChunk != null) {
+                    geminiApiClient.generateContentStream(
+                        apiKeyOverride = keyToTry.ifBlank { null },
+                        model = settings.geminiModel,
+                        systemPrompt = sysPrompt,
+                        messages = messages,
+                        imageInlineBase64 = firstImageBase64,
+                        imagesInlineBase64 = compressedImagesBase64,
+                        isWebSearchEnabled = settings.isWebSearchEnabled,
+                        onChunk = onChunk
+                    )
                 } else {
-                    finalResult = geminiResult // save error to return if all fail
-                }
-            }
-        }
-
-        // If primary failed and fallback is enabled, try the alternative
-        if (finalResult !is AiResult.Success && settings.isFallbackEnabled) {
-            if (primaryProvider == "openai" || primaryProvider == "poe" || primaryProvider == "openrouter") {
-                // Fallback to Gemini with key rotation
-                for (keyToTry in geminiKeys) {
-                    val fallbackResult = geminiApiClient.generateContent(
+                    geminiApiClient.generateContent(
                         apiKeyOverride = keyToTry.ifBlank { null },
                         model = settings.geminiModel,
                         systemPrompt = sysPrompt,
@@ -156,22 +146,85 @@ class AiRepository(
                         imagesInlineBase64 = compressedImagesBase64,
                         isWebSearchEnabled = settings.isWebSearchEnabled
                     )
+                }
+
+                if (geminiResult is AiResult.Success) {
+                    finalResult = geminiResult
+                    break
+                } else {
+                    finalResult = geminiResult
+                }
+            }
+        }
+
+        // If primary failed and fallback is enabled, try alternative configured providers
+        if (finalResult !is AiResult.Success && settings.isFallbackEnabled) {
+            if (primaryProvider == "openai" || primaryProvider == "poe" || primaryProvider == "openrouter") {
+                // Fallback to Gemini with key rotation
+                for (keyToTry in geminiKeys) {
+                    val fallbackResult = if (onChunk != null) {
+                        geminiApiClient.generateContentStream(
+                            apiKeyOverride = keyToTry.ifBlank { null },
+                            model = settings.geminiModel,
+                            systemPrompt = sysPrompt,
+                            messages = messages,
+                            imageInlineBase64 = firstImageBase64,
+                            imagesInlineBase64 = compressedImagesBase64,
+                            isWebSearchEnabled = settings.isWebSearchEnabled,
+                            onChunk = onChunk
+                        )
+                    } else {
+                        geminiApiClient.generateContent(
+                            apiKeyOverride = keyToTry.ifBlank { null },
+                            model = settings.geminiModel,
+                            systemPrompt = sysPrompt,
+                            messages = messages,
+                            imageInlineBase64 = firstImageBase64,
+                            imagesInlineBase64 = compressedImagesBase64,
+                            isWebSearchEnabled = settings.isWebSearchEnabled
+                        )
+                    }
                     if (fallbackResult is AiResult.Success) {
                         finalResult = fallbackResult
                         break
-                    } else {
-                        finalResult = fallbackResult
                     }
                 }
             } else {
-                // Fallback to OpenAI
-                finalResult = openAiApiClient.generateContent(
-                    apiKey = settings.openAiApiKey,
-                    model = settings.openAiModel,
-                    systemPrompt = sysPrompt,
-                    messages = messages,
-                    imageInlineBase64 = firstImageBase64
-                )
+                // Only fallback to other providers if their API key is actually configured
+                if (settings.openAiApiKey.isNotBlank()) {
+                    val openAiResult = openAiApiClient.generateContent(
+                        apiKey = settings.openAiApiKey,
+                        model = settings.openAiModel,
+                        systemPrompt = sysPrompt,
+                        messages = messages,
+                        imageInlineBase64 = firstImageBase64
+                    )
+                    if (openAiResult is AiResult.Success) {
+                        finalResult = openAiResult
+                    }
+                } else if (settings.openRouterApiKey.isNotBlank()) {
+                    val openRouterResult = openRouterApiClient.generateContent(
+                        apiKey = settings.openRouterApiKey,
+                        model = settings.openRouterModel,
+                        systemPrompt = sysPrompt,
+                        messages = messages,
+                        imageInlineBase64 = firstImageBase64
+                    )
+                    if (openRouterResult is AiResult.Success) {
+                        finalResult = openRouterResult
+                    }
+                } else if (settings.poeApiKey.isNotBlank()) {
+                    val poeResult = poeApiClient.generateContent(
+                        apiKey = settings.poeApiKey,
+                        model = settings.poeModel,
+                        systemPrompt = sysPrompt,
+                        messages = messages,
+                        imageInlineBase64 = firstImageBase64
+                    )
+                    if (poeResult is AiResult.Success) {
+                        finalResult = poeResult
+                    }
+                }
             }
         }
 
@@ -193,8 +246,8 @@ class AiRepository(
     private fun compressBitmapToBase64(bitmap: Bitmap, maxDim: Int): String {
         if (bitmap.isRecycled) return ""
         try {
-            // Use 1024 maxDim for ultra-fast network transfer & low latency without sacrificing OCR clarity
-            val targetMaxDim = if (maxDim in 480..1280) maxDim else 1024
+            // Use 768 maxDim for lightning-fast network upload (<40KB) with high OCR clarity
+            val targetMaxDim = if (maxDim in 480..960) maxDim else 768
             var scaledBitmap = bitmap
             val width = bitmap.width
             val height = bitmap.height
@@ -213,9 +266,9 @@ class AiRepository(
                 scaledBitmap = Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
             }
 
-            val outputStream = ByteArrayOutputStream()
-            // 75% JPEG gives sharp OCR reading with tiny ~80KB payload for instant response
-            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
+            val outputStream = ByteArrayOutputStream(32 * 1024)
+            // 70% JPEG produces crisp, legible text and diagrams with ultra-compact payload (~35KB)
+            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
             if (scaledBitmap != bitmap) {
                 try {
                     scaledBitmap.recycle()

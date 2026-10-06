@@ -63,7 +63,7 @@ class OmniAIApplication : Application() {
             val channel = NotificationChannel(
                 CHANNEL_FLOATING_SERVICE,
                 "Floating Assistant Service",
-                NotificationManager.IMPORTANCE_MIN
+                NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Silent internal channel for background overlay service"
                 setShowBadge(false)

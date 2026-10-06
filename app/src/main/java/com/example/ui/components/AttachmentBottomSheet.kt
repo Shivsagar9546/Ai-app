@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Screenshot
@@ -43,6 +44,7 @@ fun AttachmentBottomSheet(
     onCameraClick: () -> Unit,
     onGalleryClick: () -> Unit,
     onPdfClick: () -> Unit,
+    onPasteClipboardClick: () -> Unit = {},
     onScreenScanClick: () -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -56,7 +58,7 @@ fun AttachmentBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 12.dp)
+                .padding(horizontal = 20.dp, vertical = 12.dp)
                 .testTag("attachment_bottom_sheet")
         ) {
             Text(
@@ -69,8 +71,30 @@ fun AttachmentBottomSheet(
             // Grid of items
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
+                AttachmentItem(
+                    title = "Paste Image",
+                    icon = Icons.Default.ContentPaste,
+                    backgroundColor = Color(0xFF10B981),
+                    testTag = "attach_item_paste",
+                    onClick = {
+                        onDismiss()
+                        onPasteClipboardClick()
+                    }
+                )
+
+                AttachmentItem(
+                    title = "Photos",
+                    icon = Icons.Default.Image,
+                    backgroundColor = Color(0xFF8B5CF6),
+                    testTag = "attach_item_gallery",
+                    onClick = {
+                        onDismiss()
+                        onGalleryClick()
+                    }
+                )
+
                 AttachmentItem(
                     title = "Camera",
                     icon = Icons.Default.CameraAlt,
@@ -79,17 +103,6 @@ fun AttachmentBottomSheet(
                     onClick = {
                         onDismiss()
                         onCameraClick()
-                    }
-                )
-
-                AttachmentItem(
-                    title = "Photos (Max 10)",
-                    icon = Icons.Default.Image,
-                    backgroundColor = Color(0xFF8B5CF6),
-                    testTag = "attach_item_gallery",
-                    onClick = {
-                        onDismiss()
-                        onGalleryClick()
                     }
                 )
 

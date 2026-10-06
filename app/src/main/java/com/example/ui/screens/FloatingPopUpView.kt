@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
+import com.example.util.receiveImageContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DragHandle
@@ -131,8 +133,8 @@ fun FloatingPopUpView(
     onScreenshotCapture: () -> Unit,
     onOcrGrabber: () -> Unit = {},
     onQuickHud: () -> Unit = {},
-    onPickGalleryImage: ((Bitmap) -> Unit) -> Unit = {},
-    onTakePhoto: ((Bitmap) -> Unit) -> Unit = {},
+    onPickGalleryImage: () -> Unit = {},
+    onTakePhoto: () -> Unit = {},
     onVoiceInput: () -> Unit,
     onSpeakText: (String) -> Unit = {},
     onClearMessages: () -> Unit = {},
@@ -154,6 +156,7 @@ fun FloatingPopUpView(
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
 
     LaunchedEffect(externalAttachedBitmap) {
         if (externalAttachedBitmap != null) {
@@ -697,18 +700,9 @@ fun FloatingPopUpView(
                                     Text("✂️ Crop", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
 
-                                 // 2. Gallery Photo Upload
+                                // 2. Gallery Photo Upload
                                 Button(
-                                    onClick = {
-                                        com.example.service.FloatingImagePickerActivity.launchGalleryPicker(context) { bmp ->
-                                            if (attachedBitmaps.size < 4) {
-                                                attachedBitmaps = attachedBitmaps + bmp
-                                                Toast.makeText(context, "Image attached (${attachedBitmaps.size}/4)", Toast.LENGTH_SHORT).show()
-                                            } else {
-                                                Toast.makeText(context, "Maximum 4 images can be attached", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    },
+                                    onClick = onPickGalleryImage,
                                     shape = RoundedCornerShape(10.dp),
                                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                     colors = ButtonDefaults.buttonColors(
@@ -727,6 +721,38 @@ fun FloatingPopUpView(
                                     Spacer(modifier = Modifier.width(3.dp))
                                     Text("🖼️ Gallery", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
+
+                                // 3. Clipboard Screenshot Paste Button
+                                Button(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            val bitmaps = com.example.util.ClipboardImageHelper.getBitmapsFromClipboard(context)
+                                            if (bitmaps.isNotEmpty()) {
+                                                attachedBitmaps = (attachedBitmaps + bitmaps).take(10)
+                                                Toast.makeText(context, "Pasted ${bitmaps.size} image(s) from clipboard", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(context, "No screenshot/image in clipboard", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    ),
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .testTag("popup_paste_clipboard_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentPaste,
+                                        contentDescription = "Paste Clipboard Screenshot",
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("📋 Paste", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
 
                             // Input Field with Attach, Voice & Send Buttons
@@ -737,16 +763,7 @@ fun FloatingPopUpView(
                             ) {
                                 // Direct Image Attachment (+) / Photo Button from Gallery
                                 IconButton(
-                                    onClick = {
-                                        com.example.service.FloatingImagePickerActivity.launchGalleryPicker(context) { bmp ->
-                                            if (attachedBitmaps.size < 4) {
-                                                attachedBitmaps = attachedBitmaps + bmp
-                                                Toast.makeText(context, "Image attached (${attachedBitmaps.size}/4)", Toast.LENGTH_SHORT).show()
-                                            } else {
-                                                Toast.makeText(context, "Maximum 4 images can be attached", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    },
+                                    onClick = onPickGalleryImage,
                                     modifier = Modifier
                                         .size(38.dp)
                                         .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
@@ -771,6 +788,15 @@ fun FloatingPopUpView(
                                     },
                                     modifier = Modifier
                                         .weight(1f)
+                                        .receiveImageContent { clipData ->
+                                            coroutineScope.launch {
+                                                val bitmaps = com.example.util.ClipboardImageHelper.extractBitmapsFromClipData(context, clipData)
+                                                if (bitmaps.isNotEmpty()) {
+                                                    attachedBitmaps = (attachedBitmaps + bitmaps).take(10)
+                                                    Toast.makeText(context, "Pasted ${bitmaps.size} image(s)", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
                                         .testTag("popup_input_field"),
                                     shape = RoundedCornerShape(20.dp),
                                     singleLine = false,

@@ -144,6 +144,12 @@ fun ScreenAssistantHubScreen(
 
 
 
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        startFloatingService(context)
+    }
+
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -254,18 +260,12 @@ fun ScreenAssistantHubScreen(
                                         Toast.makeText(context, "Please grant 'Display over other apps' permission first", Toast.LENGTH_LONG).show()
                                         requestOverlayPermission(context)
                                     } else {
-                                        try {
-                                            val intent = Intent(context, FloatingAssistantService::class.java).apply {
-                                                action = FloatingAssistantService.ACTION_SHOW_BUBBLE
-                                            }
-                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                                context.startForegroundService(intent)
-                                            } else {
-                                                context.startService(intent)
-                                            }
-                                            Toast.makeText(context, "Floating Assistant Bubble started!", Toast.LENGTH_SHORT).show()
-                                        } catch (e: Exception) {
-                                            Toast.makeText(context, "Failed to start service: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                                        ) {
+                                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                        } else {
+                                            startFloatingService(context)
                                         }
                                     }
                                 } else {
@@ -792,20 +792,15 @@ fun ScreenAssistantHubScreen(
             Button(
                 onClick = {
                     if (!Settings.canDrawOverlays(context)) {
+                        Toast.makeText(context, "Please grant 'Display over other apps' permission first", Toast.LENGTH_LONG).show()
                         requestOverlayPermission(context)
                     } else {
-                        try {
-                            val intent = Intent(context, FloatingAssistantService::class.java).apply {
-                                action = FloatingAssistantService.ACTION_SHOW_BUBBLE
-                            }
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                context.startForegroundService(intent)
-                            } else {
-                                context.startService(intent)
-                            }
-                            Toast.makeText(context, "Floating Assistant Bubble launched with custom style!", Toast.LENGTH_SHORT).show()
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Failed to start service: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            startFloatingService(context)
                         }
                     }
                 },
@@ -823,6 +818,22 @@ fun ScreenAssistantHubScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
         }
+    }
+}
+
+private fun startFloatingService(context: Context) {
+    try {
+        val intent = Intent(context, FloatingAssistantService::class.java).apply {
+            action = FloatingAssistantService.ACTION_SHOW_BUBBLE
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+        Toast.makeText(context, "Floating Assistant Bubble started!", Toast.LENGTH_SHORT).show()
+    } catch (e: Exception) {
+        Toast.makeText(context, "Failed to start service: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
     }
 }
 

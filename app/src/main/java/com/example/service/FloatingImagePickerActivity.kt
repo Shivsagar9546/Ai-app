@@ -38,8 +38,12 @@ class FloatingImagePickerActivity : ComponentActivity() {
     private val getContentLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        handleImageUri(uri)
-        safeFinish()
+        if (uri != null) {
+            handleImageUri(uri)
+        } else {
+            FloatingAssistantService.activeServiceInstance?.showPopup()
+            safeFinish()
+        }
     }
  
     private val screenCaptureLauncher = registerForActivityResult(
@@ -59,9 +63,8 @@ class FloatingImagePickerActivity : ComponentActivity() {
     ) { uri: Uri? ->
         if (uri != null) {
             handleImageUri(uri)
-            safeFinish()
         } else {
-            // Fallback to GetContent if cancelled or empty
+            FloatingAssistantService.activeServiceInstance?.showPopup()
             safeFinish()
         }
     }
@@ -74,10 +77,12 @@ class FloatingImagePickerActivity : ComponentActivity() {
                 takePhotoLauncher.launch(null)
             } catch (e: Exception) {
                 Toast.makeText(this, "Camera not available: ${e.message}", Toast.LENGTH_SHORT).show()
+                FloatingAssistantService.activeServiceInstance?.showPopup()
                 safeFinish()
             }
         } else {
             Toast.makeText(this, "Camera permission needed to take photos", Toast.LENGTH_SHORT).show()
+            FloatingAssistantService.activeServiceInstance?.showPopup()
             safeFinish()
         }
     }
@@ -88,6 +93,8 @@ class FloatingImagePickerActivity : ComponentActivity() {
         if (bitmap != null) {
             val scaled = scaleDownBitmap(bitmap, 1280)
             onImageSelectedCallback?.invoke(scaled)
+        } else {
+            FloatingAssistantService.activeServiceInstance?.showPopup()
         }
         safeFinish()
     }
@@ -99,12 +106,7 @@ class FloatingImagePickerActivity : ComponentActivity() {
             MODE_SCREEN_CAPTURE -> {
                 try {
                     val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                    val captureIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                        val config = android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay()
-                        mediaProjectionManager.createScreenCaptureIntent(config)
-                    } else {
-                        mediaProjectionManager.createScreenCaptureIntent()
-                    }
+                    val captureIntent = mediaProjectionManager.createScreenCaptureIntent()
                     screenCaptureLauncher.launch(captureIntent)
                 } catch (e: Exception) {
                     Toast.makeText(this, "Screen capture not supported: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -145,17 +147,23 @@ class FloatingImagePickerActivity : ComponentActivity() {
 
     private fun handleImageUri(uri: Uri?) {
         if (uri == null) {
+            FloatingAssistantService.activeServiceInstance?.showPopup()
             safeFinish()
             return
         }
         try {
-            // First decode with inJustDecodeBounds to prevent OutOfMemoryError on large images
+            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            if (bytes == null || bytes.isEmpty()) {
+                Toast.makeText(this, "Could not read image data", Toast.LENGTH_SHORT).show()
+                FloatingAssistantService.activeServiceInstance?.showPopup()
+                safeFinish()
+                return
+            }
+
             val boundsOptions = BitmapFactory.Options().apply {
                 inJustDecodeBounds = true
             }
-            contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, boundsOptions)
-            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, boundsOptions)
 
             var sampleSize = 1
             val maxDim = 1280
@@ -174,18 +182,18 @@ class FloatingImagePickerActivity : ComponentActivity() {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
 
-            val bitmap = contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, decodeOptions)
-            }
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
 
             if (bitmap != null) {
                 val scaled = scaleDownBitmap(bitmap, 1280)
                 onImageSelectedCallback?.invoke(scaled)
             } else {
                 Toast.makeText(this, "Could not load image file", Toast.LENGTH_SHORT).show()
+                FloatingAssistantService.activeServiceInstance?.showPopup()
             }
         } catch (t: Throwable) {
             Toast.makeText(this, "Error loading image: ${t.localizedMessage}", Toast.LENGTH_SHORT).show()
+            FloatingAssistantService.activeServiceInstance?.showPopup()
         } finally {
             safeFinish()
         }
@@ -206,6 +214,7 @@ class FloatingImagePickerActivity : ComponentActivity() {
         val projection = try {
             mpManager?.getMediaProjection(resultCode, resultData)
         } catch (e: Exception) {
+            android.util.Log.e("FloatingImagePicker", "getMediaProjection error", e)
             null
         }
 
@@ -229,35 +238,23 @@ class FloatingImagePickerActivity : ComponentActivity() {
         val backgroundHandler = Handler(handlerThread.looper)
         val mainHandler = Handler(Looper.getMainLooper())
 
-        val imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 3)
-
-        val virtualDisplay = try {
-            projection.createVirtualDisplay(
-                "ScreenCapture",
-                width,
-                height,
-                density,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader.surface,
-                null,
-                backgroundHandler
-            )
-        } catch (e: Exception) {
-            null
-        }
-
-        if (virtualDisplay == null) {
-            try { projection.stop() } catch (_: Throwable) {}
-            try { imageReader.close() } catch (_: Throwable) {}
-            try { handlerThread.quitSafely() } catch (_: Throwable) {}
-            fgs?.demoteFromMediaProjectionFgs()
-            fgs?.showBubble()
-            Toast.makeText(this, "Virtual display setup failed", Toast.LENGTH_SHORT).show()
-            safeFinish()
-            return
-        }
-
+        val imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
         val isProcessed = AtomicBoolean(false)
+        var virtualDisplay: android.hardware.display.VirtualDisplay? = null
+
+        // Android 14+ (API 34+) REQUIRES registering a MediaProjection.Callback BEFORE createVirtualDisplay()
+        val callback = object : android.media.projection.MediaProjection.Callback() {
+            override fun onStop() {
+                super.onStop()
+            }
+        }
+        try {
+            projection.registerCallback(callback, backgroundHandler)
+        } catch (e: Exception) {
+            try {
+                projection.registerCallback(callback, Handler(Looper.getMainLooper()))
+            } catch (_: Throwable) {}
+        }
 
         val timeoutRunnable = Runnable {
             if (isProcessed.compareAndSet(false, true)) {
@@ -270,16 +267,7 @@ class FloatingImagePickerActivity : ComponentActivity() {
                 }
             }
         }
-        backgroundHandler.postDelayed(timeoutRunnable, 2500)
-
-        val callback = object : android.media.projection.MediaProjection.Callback() {
-            override fun onStop() {
-                super.onStop()
-            }
-        }
-        try {
-            projection.registerCallback(callback, backgroundHandler)
-        } catch (_: Throwable) {}
+        backgroundHandler.postDelayed(timeoutRunnable, 3500)
 
         imageReader.setOnImageAvailableListener({ reader ->
             if (isProcessed.get()) return@setOnImageAvailableListener
@@ -340,6 +328,34 @@ class FloatingImagePickerActivity : ComponentActivity() {
                 }
             }
         }, backgroundHandler)
+
+        virtualDisplay = try {
+            projection.createVirtualDisplay(
+                "ScreenCapture",
+                width,
+                height,
+                density,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.surface,
+                null,
+                backgroundHandler
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("FloatingImagePicker", "createVirtualDisplay failed", e)
+            null
+        }
+
+        if (virtualDisplay == null) {
+            backgroundHandler.removeCallbacks(timeoutRunnable)
+            try { projection.stop() } catch (_: Throwable) {}
+            try { imageReader.close() } catch (_: Throwable) {}
+            try { handlerThread.quitSafely() } catch (_: Throwable) {}
+            fgs?.demoteFromMediaProjectionFgs()
+            fgs?.showBubble()
+            Toast.makeText(this, "Virtual display setup failed", Toast.LENGTH_SHORT).show()
+            safeFinish()
+            return
+        }
     }
 
     private fun cleanupProjectionSafely(

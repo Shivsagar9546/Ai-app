@@ -49,6 +49,9 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.theme.CodeBlockBackgroundDark
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.util.LruCache
+
+private val markdownBlockCache = LruCache<String, List<MarkdownBlock>>(200)
 
 @Composable
 fun MarkdownText(
@@ -56,7 +59,9 @@ fun MarkdownText(
     modifier: Modifier = Modifier,
     textColor: Color = MaterialTheme.colorScheme.onSurface
 ) {
-    val blocks = remember(text) { parseMarkdownBlocks(text) }
+    val blocks = remember(text) { 
+        markdownBlockCache.get(text) ?: parseMarkdownBlocks(text).also { markdownBlockCache.put(text, it) }
+    }
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -119,68 +124,32 @@ fun MarkdownText(
 
 @Composable
 fun MathFormulaCard(formula: String) {
-    val context = LocalContext.current
-    var copied by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     val formattedFormula = remember(formula) { formatMathSymbols(formula) }
 
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
+            .padding(vertical = 4.dp),
+        contentAlignment = Alignment.CenterStart
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)),
+            modifier = Modifier.padding(vertical = 2.dp)
         ) {
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            Box(
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Functions,
-                    contentDescription = "Math Formula",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-
-                Box(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                    Text(
-                        text = formattedFormula,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-            }
-
-            IconButton(
-                onClick = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val clip = ClipData.newPlainText("Math Formula", formula)
-                    clipboard.setPrimaryClip(clip)
-                    Toast.makeText(context, "Formula copied", Toast.LENGTH_SHORT).show()
-                    copied = true
-                    scope.launch {
-                        delay(2000)
-                        copied = false
-                    }
-                },
-                modifier = Modifier.size(28.dp)
-            ) {
-                Icon(
-                    imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
-                    contentDescription = "Copy formula",
-                    tint = if (copied) Color(0xFF10B981) else MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp)
+                Text(
+                    text = formattedFormula,
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    lineHeight = 24.sp
                 )
             }
         }
@@ -341,46 +310,107 @@ fun parseMarkdownBlocks(rawText: String): List<MarkdownBlock> {
 }
 
 fun formatMathSymbols(raw: String): String {
-    return raw
-        .replace("\\frac{", "(")
-        .replace("}{", ")/(")
-        .replace("}", ")")
-        .replace("\\sqrt{", "√(")
-        .replace("\\sqrt", "√")
-        .replace("\\times", " × ")
-        .replace("\\div", " ÷ ")
-        .replace("\\pm", " ± ")
+    var res = raw.trim()
+
+    // 1. Clean LaTeX wrappers like \text{...}, \mathrm{...}, \mathbf{...}, \operatorname{...}
+    var prev = ""
+    var iter1 = 0
+    while (prev != res && iter1 < 10) {
+        prev = res
+        iter1++
+        res = res.replace(Regex("""\\text\{([^{}]*)\}""")) { it.groupValues[1] }
+        res = res.replace(Regex("""\\mathrm\{([^{}]*)\}""")) { it.groupValues[1] }
+        res = res.replace(Regex("""\\mathbf\{([^{}]*)\}""")) { it.groupValues[1] }
+        res = res.replace(Regex("""\\operatorname\{([^{}]*)\}""")) { it.groupValues[1] }
+        res = res.replace(Regex("""\\displaystyle"""), "")
+        res = res.replace(Regex("""\\limits"""), "")
+    }
+
+    // 2. Clean nested fractions \frac{a}{b} -> (a)/(b) or a/b
+    prev = ""
+    var iter2 = 0
+    while (prev != res && iter2 < 10) {
+        prev = res
+        iter2++
+        res = res.replace(Regex("""\\frac\{([^{}]*)\}\{([^{}]*)\}""")) { match ->
+            val num = match.groupValues[1].trim()
+            val den = match.groupValues[2].trim()
+            if (num.length <= 3 && den.length <= 3 && !num.contains(" ") && !den.contains(" ")) {
+                "$num/$den"
+            } else {
+                "($num)/($den)"
+            }
+        }
+    }
+
+    // 3. Clean subscripts with curly braces like h_{sph} -> h_sph, I_{cyl} -> I_cyl
+    res = res.replace(Regex("""([a-zA-Z0-9]+)_\{([^{}]*)\}""")) { "${it.groupValues[1]}_${it.groupValues[2]}" }
+
+    // 4. Clean brackets & parens
+    res = res.replace("\\left(", "(").replace("\\right)", ")")
+    res = res.replace("\\left[", "[").replace("\\right]", "]")
+    res = res.replace("\\left\\{", "{").replace("\\right\\}", "}")
+    res = res.replace("\\left.", "").replace("\\right.", "")
+    res = res.replace("\\left", "").replace("\\right", "")
+
+    // 5. Greek letters & symbols
+    res = res
+        .replace("\\omega", "ω")
+        .replace("\\Omega", "Ω")
+        .replace("\\alpha", "α")
+        .replace("\\beta", "β")
+        .replace("\\theta", "θ")
+        .replace("\\Theta", "Θ")
+        .replace("\\pi", "π")
+        .replace("\\mu", "μ")
+        .replace("\\lambda", "λ")
+        .replace("\\rho", "ρ")
+        .replace("\\sigma", "σ")
+        .replace("\\tau", "τ")
+        .replace("\\phi", "φ")
+        .replace("\\Phi", "Φ")
+        .replace("\\Delta", "Δ")
+        .replace("\\delta", "δ")
+        .replace("\\infty", "∞")
+        .replace("\\propto", " ∝ ")
         .replace("\\approx", " ≈ ")
         .replace("\\neq", " ≠ ")
         .replace("\\leq", " ≤ ")
         .replace("\\geq", " ≥ ")
         .replace("\\le", " ≤ ")
         .replace("\\ge", " ≥ ")
-        .replace("\\alpha", "α")
-        .replace("\\beta", "β")
-        .replace("\\theta", "θ")
-        .replace("\\pi", "π")
-        .replace("\\infty", "∞")
+        .replace("\\times", " × ")
+        .replace("\\cdot", " · ")
+        .replace("\\div", " ÷ ")
+        .replace("\\pm", " ± ")
         .replace("\\int", "∫")
         .replace("\\sum", "∑")
-        .replace("\\cdot", " · ")
-        .replace("\\Delta", "Δ")
+        .replace("\\sqrt{", "√(")
+        .replace("\\sqrt", "√")
+        .replace("\\cos", "cos")
+        .replace("\\sin", "sin")
+        .replace("\\tan", "tan")
+        .replace("\\log", "log")
+        .replace("\\ln", "ln")
+
+    // 6. Common powers
+    res = res
         .replace("^2", "²")
         .replace("^3", "³")
         .replace("^{2}", "²")
         .replace("^{3}", "³")
+        .replace("^{4}", "⁴")
         .replace("^{n}", "ⁿ")
         .replace("^{-1}", "⁻¹")
+        .replace("^{-2}", "⁻²")
         .replace("^⁻¹", "⁻¹")
-        .replace("\\cos", "cos")
-        .replace("\\sin", "sin")
-        .replace("\\tan", "tan")
-        .replace("\\left(", "(")
-        .replace("\\right)", ")")
-        .replace("\\left[", "[")
-        .replace("\\right]", "]")
-        .replace("\\left", "")
-        .replace("\\right", "")
+
+    // Clean remaining backslashes before plain words
+    res = res.replace(Regex("""\\([a-zA-Z]+)""")) { it.groupValues[1] }
+    // Clean residual double spaces
+    res = res.replace(Regex("""\s+"""), " ")
+
+    return res
 }
 
 private val BOLD_REGEX = Regex("\\*\\*(.*?)\\*\\*")
@@ -390,12 +420,13 @@ private val INLINE_MATH_REGEX = Regex("\\$(.*?)\\$")
 @Composable
 fun parseInlineMarkdown(text: String, defaultColor: Color): androidx.compose.ui.text.AnnotatedString {
     val primaryColor = MaterialTheme.colorScheme.primary
-    val primaryContainerColor = MaterialTheme.colorScheme.primaryContainer
-    return remember(text, defaultColor, primaryColor, primaryContainerColor) {
+    return remember(text, defaultColor, primaryColor) {
         try {
             buildAnnotatedString {
                 var remaining = text
-                while (remaining.isNotEmpty()) {
+                var loopLimit = 0
+                while (remaining.isNotEmpty() && loopLimit < 300) {
+                    loopLimit++
                     val boldMatch = BOLD_REGEX.find(remaining)
                     val codeMatch = CODE_REGEX.find(remaining)
                     val mathMatch = INLINE_MATH_REGEX.find(remaining)
@@ -422,7 +453,7 @@ fun parseInlineMarkdown(text: String, defaultColor: Color): androidx.compose.ui.
                         withStyle(
                             SpanStyle(
                                 fontFamily = FontFamily.Monospace,
-                                background = Color(0x336366F1),
+                                background = Color(0x226366F1),
                                 fontWeight = FontWeight.SemiBold,
                                 color = primaryColor
                             )
@@ -433,10 +464,9 @@ fun parseInlineMarkdown(text: String, defaultColor: Color): androidx.compose.ui.
                         val formula = formatMathSymbols(mathMatch.groupValues[1])
                         withStyle(
                             SpanStyle(
-                                fontFamily = FontFamily.Monospace,
-                                background = primaryContainerColor.copy(alpha = 0.4f),
-                                fontWeight = FontWeight.Bold,
-                                color = primaryColor
+                                fontFamily = FontFamily.Serif,
+                                fontWeight = FontWeight.SemiBold,
+                                color = defaultColor
                             )
                         ) {
                             append(" $formula ")

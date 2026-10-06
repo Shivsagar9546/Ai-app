@@ -1,6 +1,7 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -63,6 +64,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
+
+    private val _streamingText = MutableStateFlow<String?>(null)
+    val streamingText: StateFlow<String?> = _streamingText.asStateFlow()
 
     private val _attachedBitmap = MutableStateFlow<Bitmap?>(null)
     val attachedBitmap: StateFlow<Bitmap?> = _attachedBitmap.asStateFlow()
@@ -225,6 +229,30 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun pasteFromClipboard() {
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            val bitmaps = com.example.util.ClipboardImageHelper.getBitmapsFromClipboard(context)
+            if (bitmaps.isNotEmpty()) {
+                addAttachedBitmaps(bitmaps)
+                Toast.makeText(context, "Screenshot/Image pasted (${bitmaps.size})", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "No image found in clipboard", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun attachClipData(clipData: ClipData) {
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            val bitmaps = com.example.util.ClipboardImageHelper.extractBitmapsFromClipData(context, clipData)
+            if (bitmaps.isNotEmpty()) {
+                addAttachedBitmaps(bitmaps)
+                Toast.makeText(context, "Pasted ${bitmaps.size} image(s) from keyboard/clipboard", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     fun clearAttachedBitmap() {
         clearAttachedBitmaps()
     }
@@ -323,15 +351,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 AiMessage(role = it.role, text = it.text, imageBase64 = it.imageBase64)
             }
 
+            _streamingText.value = ""
             val result = aiRepository.askAi(
                 messages = aiMessages,
                 imageBitmap = primaryImage,
                 imageBitmaps = images,
-                isScreenScan = isScan
+                isScreenScan = isScan,
+                onChunk = { chunk ->
+                    _streamingText.value = (_streamingText.value ?: "") + chunk
+                }
             )
 
             _isGenerating.value = false
             _statusMessage.value = null
+            _streamingText.value = null
 
             // Free bitmap memory immediately
             withContext(Dispatchers.Default) {
@@ -380,15 +413,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             _isGenerating.value = true
+            _streamingText.value = ""
             val updatedList = chatDao.getMessagesList(convId)
             val aiMessages = updatedList.map { AiMessage(role = it.role, text = it.text, imageBase64 = it.imageBase64) }
 
             val result = aiRepository.askAi(
                 messages = aiMessages,
-                isScreenScan = lastUserMsg.isScreenScan
+                isScreenScan = lastUserMsg.isScreenScan,
+                onChunk = { chunk ->
+                    _streamingText.value = (_streamingText.value ?: "") + chunk
+                }
             )
 
             _isGenerating.value = false
+            _streamingText.value = null
             when (result) {
                 is AiResult.Success -> {
                     chatDao.insertMessage(
@@ -419,6 +457,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         generationJob?.cancel()
         generationJob = null
         _isGenerating.value = false
+        _streamingText.value = null
         _statusMessage.value = null
     }
 
