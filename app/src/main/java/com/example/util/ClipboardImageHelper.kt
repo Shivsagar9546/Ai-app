@@ -41,38 +41,94 @@ object ClipboardImageHelper {
     private const val TAG = "ClipboardImageHelper"
 
     /**
-     * Checks if the system clipboard currently contains an image or screenshot URI.
+     * Checks if the system clipboard currently contains an image or screenshot URI,
+     * or if a screenshot was recently captured on device.
      */
     fun hasImageInClipboard(context: Context): Boolean {
-        return try {
+        // 1. Check direct ClipboardManager
+        try {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                ?: return false
-            val clip = clipboard.primaryClip ?: return false
-            if (clip.itemCount == 0) return false
-
-            val description = clip.description ?: return false
-            if (description.hasMimeType("image/*") || 
-                description.hasMimeType("image/png") || 
-                description.hasMimeType("image/jpeg") ||
-                description.hasMimeType("image/webp") ||
-                description.hasMimeType("image/heic")
-            ) {
-                return true
-            }
-
-            // Fallback check on first item uri
-            val item = clip.getItemAt(0)
-            val uri = item?.uri
-            if (uri != null) {
-                val type = context.contentResolver.getType(uri)
-                if (type?.startsWith("image/") == true) {
-                    return true
+            if (clipboard != null && clipboard.hasPrimaryClip()) {
+                val clip = clipboard.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val description = clip.description
+                    if (description != null) {
+                        if (description.hasMimeType("image/*") || 
+                            description.hasMimeType("image/png") || 
+                            description.hasMimeType("image/jpeg") ||
+                            description.hasMimeType("image/webp") ||
+                            description.hasMimeType("image/heic")
+                        ) {
+                            return true
+                        }
+                    }
+                    val item = clip.getItemAt(0)
+                    val uri = item?.uri
+                    if (uri != null) {
+                        val type = try { context.contentResolver.getType(uri) } catch (_: Exception) { null }
+                        if (type?.startsWith("image/") == true) {
+                            return true
+                        }
+                    }
                 }
             }
-            false
         } catch (e: Exception) {
             Log.e(TAG, "Error checking clipboard for image: ${e.message}")
+        }
+
+        // 2. Check for recent screenshot taken in the last 3 minutes
+        return try {
+            getRecentScreenshotUri(context) != null
+        } catch (_: Exception) {
             false
+        }
+    }
+
+    /**
+     * Looks up the latest screenshot taken on this device in the last 3 minutes.
+     */
+    fun getRecentScreenshotUri(context: Context): Uri? {
+        return try {
+            val threeMinutesAgo = (System.currentTimeMillis() / 1000) - 180
+            val projection = arrayOf(
+                android.provider.MediaStore.Images.Media._ID,
+                android.provider.MediaStore.Images.Media.DATE_ADDED,
+                android.provider.MediaStore.Images.Media.DISPLAY_NAME
+            )
+            val selection = "${android.provider.MediaStore.Images.Media.DATE_ADDED} >= ?"
+            val selectionArgs = arrayOf(threeMinutesAgo.toString())
+            val sortOrder = "${android.provider.MediaStore.Images.Media.DATE_ADDED} DESC"
+
+            context.contentResolver.query(
+                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                sortOrder
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media._ID)
+                    val nameCol = cursor.getColumnIndex(android.provider.MediaStore.Images.Media.DISPLAY_NAME)
+                    val name = if (nameCol != -1) cursor.getString(nameCol)?.lowercase() ?: "" else ""
+                    val id = cursor.getLong(idCol)
+                    
+                    // Prioritize if filename contains screenshot / capture
+                    if (name.contains("screenshot") || name.contains("screen") || name.contains("capture") || name.contains("img_")) {
+                        return@use android.content.ContentUris.withAppendedId(
+                            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            id
+                        )
+                    }
+                    // Fallback to recent image
+                    return@use android.content.ContentUris.withAppendedId(
+                        android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        id
+                    )
+                }
+                null
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -113,21 +169,41 @@ object ClipboardImageHelper {
     }
 
     /**
-     * Extracts images directly from the system clipboard.
+     * Extracts images directly from the system clipboard or recent screenshot.
      */
     suspend fun getBitmapsFromClipboard(
         context: Context,
         maxDim: Int = 1024
     ): List<Bitmap> = withContext(Dispatchers.IO) {
+        // 1. Try system clipboard first
         try {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                ?: return@withContext emptyList()
-            val clip = clipboard.primaryClip ?: return@withContext emptyList()
-            extractBitmapsFromClipData(context, clip, maxDim)
+            if (clipboard != null && clipboard.hasPrimaryClip()) {
+                val clip = clipboard.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val extracted = extractBitmapsFromClipData(context, clip, maxDim)
+                    if (extracted.isNotEmpty()) {
+                        return@withContext extracted
+                    }
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error reading image from clipboard: ${e.message}")
-            emptyList()
         }
+
+        // 2. Try recent screenshot if clipboard had no image
+        try {
+            val recentScreenshotUri = getRecentScreenshotUri(context)
+            if (recentScreenshotUri != null) {
+                decodeSampledBitmapFromUri(context, recentScreenshotUri, maxDim, maxDim)?.let { bmp ->
+                    return@withContext listOf(bmp)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading recent screenshot: ${e.message}")
+        }
+
+        emptyList()
     }
 
     /**

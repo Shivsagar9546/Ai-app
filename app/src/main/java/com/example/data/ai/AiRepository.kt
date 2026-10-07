@@ -71,7 +71,8 @@ class AiRepository(
 
         val firstImageBase64 = compressedImagesBase64.firstOrNull()
         val primaryProvider = settings.defaultProvider.lowercase()
-        val sysPrompt = systemPromptOverride ?: settings.systemPrompt
+        val baseSysPrompt = systemPromptOverride ?: settings.systemPrompt
+        val sysPrompt = buildEnrichedSystemPrompt(baseSysPrompt)
 
         // Prepare Gemini Keys to try
         val geminiKeys = mutableListOf<String>()
@@ -278,6 +279,29 @@ class AiRepository(
             return Base64.encodeToString(byteArray, Base64.NO_WRAP)
         } catch (_: Exception) {
             return ""
+        }
+    }
+
+    private fun buildEnrichedSystemPrompt(basePrompt: String): String {
+        val now = java.util.Date()
+        val fullDateFormat = java.text.SimpleDateFormat("EEEE, dd MMMM yyyy", java.util.Locale.getDefault()).format(now)
+        val timeFormat = java.text.SimpleDateFormat("hh:mm a (zzzz)", java.util.Locale.getDefault()).format(now)
+        val currentYear = java.text.SimpleDateFormat("yyyy", java.util.Locale.getDefault()).format(now)
+
+        val temporalHeader = """
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            📅 REAL-TIME TEMPORAL CONTEXT:
+            - Current Date: $fullDateFormat
+            - Current Time: $timeFormat
+            - Current Year: $currentYear
+            - RULE: You have real-time calendar and clock awareness. Whenever the user asks about today's date, the current day, what day it is, the current month, or the current year, answer with 100% accuracy using this exact date ($fullDateFormat) and year ($currentYear).
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """.trimIndent()
+
+        return if (basePrompt.isNotBlank()) {
+            "$basePrompt\n\n$temporalHeader"
+        } else {
+            temporalHeader
         }
     }
 

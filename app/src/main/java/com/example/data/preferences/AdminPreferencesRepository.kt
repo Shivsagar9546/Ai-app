@@ -169,7 +169,13 @@ class AdminPreferencesRepository(val context: Context) {
         AdminSettings(
             defaultProvider = preferences[PreferencesKeys.DEFAULT_PROVIDER] ?: "gemini",
             geminiApiKey = preferences[PreferencesKeys.GEMINI_API_KEY] ?: "",
-            geminiModel = preferences[PreferencesKeys.GEMINI_MODEL] ?: "auto",
+            geminiModel = preferences[PreferencesKeys.GEMINI_MODEL]?.let { stored ->
+                if (stored.isBlank() || com.example.data.ai.GeminiModelRegistry.isDeprecated(stored)) {
+                    "auto"
+                } else {
+                    stored
+                }
+            } ?: "auto",
             isGeminiEnabled = preferences[PreferencesKeys.GEMINI_ENABLED] ?: true,
             openAiApiKey = preferences[PreferencesKeys.OPENAI_API_KEY] ?: "",
             openAiModel = preferences[PreferencesKeys.OPENAI_MODEL] ?: "gpt-4o-mini",
@@ -254,7 +260,10 @@ class AdminPreferencesRepository(val context: Context) {
         context.dataStore.edit { preferences ->
             defaultProvider?.let { preferences[PreferencesKeys.DEFAULT_PROVIDER] = it }
             geminiApiKey?.let { preferences[PreferencesKeys.GEMINI_API_KEY] = it }
-            geminiModel?.let { preferences[PreferencesKeys.GEMINI_MODEL] = it }
+            geminiModel?.let {
+                val clean = if (it.isBlank() || com.example.data.ai.GeminiModelRegistry.isDeprecated(it)) "auto" else it.trim()
+                preferences[PreferencesKeys.GEMINI_MODEL] = clean
+            }
             isGeminiEnabled?.let { preferences[PreferencesKeys.GEMINI_ENABLED] = it }
             openAiApiKey?.let { preferences[PreferencesKeys.OPENAI_API_KEY] = it }
             openAiModel?.let { preferences[PreferencesKeys.OPENAI_MODEL] = it }

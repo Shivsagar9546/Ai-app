@@ -12,6 +12,53 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
+object GeminiModelRegistry {
+    val ACTIVE_MODELS = listOf(
+        "gemini-3.7-flash",
+        "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-lite-preview",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite"
+    )
+
+    val DEPRECATED_OR_INVALID_MODELS = setOf(
+        "gemini-1.0-pro",
+        "gemini-1.0-pro-vision",
+        "gemini-pro",
+        "gemini-pro-vision",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+        "gemini-1.5-pro",
+        "gemini-3.5-flash",
+        "gemini-flash-latest",
+        "gemini-pro-latest"
+    )
+
+    fun isDeprecated(model: String): Boolean {
+        val lower = model.trim().lowercase()
+        return DEPRECATED_OR_INVALID_MODELS.contains(lower) || lower.startsWith("gemini-1.0") || lower.startsWith("gemini-1.5")
+    }
+
+    fun buildFallbackChain(requestedModel: String): List<String> {
+        val chain = mutableListOf<String>()
+        val cleanRequested = requestedModel.trim().lowercase()
+
+        if (cleanRequested.isNotBlank() && cleanRequested != "auto" && !isDeprecated(cleanRequested)) {
+            chain.add(cleanRequested)
+        }
+
+        // Chain all latest Gemini 3.x and 2.5+ models in priority order
+        ACTIVE_MODELS.forEach { model ->
+            if (!chain.contains(model)) {
+                chain.add(model)
+            }
+        }
+        return chain
+    }
+}
+
 class GeminiApiClient {
 
     private val client = OkHttpClient.Builder()
@@ -172,20 +219,13 @@ class GeminiApiClient {
         }
 
         val latestUserQuery = messages.lastOrNull { it.role.equals("user", ignoreCase = true) }?.text ?: ""
-        val resolvedModel = if (model == "auto" || model.isBlank()) {
+        val resolvedModel = if (model == "auto" || model.isBlank() || GeminiModelRegistry.isDeprecated(model)) {
             autoSelectModel(latestUserQuery, hasImages = allImages.isNotEmpty())
         } else {
             model
         }
 
-        val requestedModel = if (resolvedModel.isNotBlank()) resolvedModel else "gemini-3.5-flash"
-        val modelsToTry = mutableListOf<String>().apply {
-            add(requestedModel)
-            if (requestedModel != "gemini-3.5-flash") add("gemini-3.5-flash")
-            if (requestedModel != "gemini-flash-latest") add("gemini-flash-latest")
-            if (requestedModel != "gemini-3.1-flash-lite-preview") add("gemini-3.1-flash-lite-preview")
-        }.distinct()
-
+        val modelsToTry = GeminiModelRegistry.buildFallbackChain(resolvedModel)
         var lastErrorMsg = "Unable to reach Gemini servers."
         var isQuotaOrKey = false
 
@@ -219,12 +259,11 @@ class GeminiApiClient {
                     val isQuotaError = responseCode == 429
                     isQuotaOrKey = isKeyError || isQuotaError
 
-                    if (!isKeyError && targetModel != modelsToTry.last()) {
+                    Log.w("GeminiApiClient", "Model $targetModel failed ($responseCode: $errorMsg). Auto-falling back to next model...")
+                    if (targetModel != modelsToTry.last()) {
                         continue
                     }
-                    if (targetModel == modelsToTry.last() || isKeyError) {
-                        return@withContext AiResult.Error(errorMsg, isQuotaOrKeyError = isQuotaOrKey)
-                    }
+                    return@withContext AiResult.Error(errorMsg, isQuotaOrKeyError = isQuotaOrKey)
                 }
 
                 response.body?.byteStream()?.bufferedReader()?.use { reader ->
@@ -318,21 +357,13 @@ class GeminiApiClient {
         }
 
         val latestUserQuery = messages.lastOrNull { it.role.equals("user", ignoreCase = true) }?.text ?: ""
-        val resolvedModel = if (model == "auto" || model.isBlank()) {
+        val resolvedModel = if (model == "auto" || model.isBlank() || GeminiModelRegistry.isDeprecated(model)) {
             autoSelectModel(latestUserQuery, hasImages = allImages.isNotEmpty())
         } else {
             model
         }
 
-        val requestedModel = if (resolvedModel.isNotBlank()) resolvedModel else "gemini-3.5-flash"
-        val modelsToTry = mutableListOf<String>().apply {
-            add(requestedModel)
-            if (requestedModel != "gemini-3.5-flash") add("gemini-3.5-flash")
-            if (requestedModel != "gemini-flash-latest") add("gemini-flash-latest")
-            if (requestedModel != "gemini-3.1-flash-lite-preview") add("gemini-3.1-flash-lite-preview")
-            if (requestedModel != "gemini-3.1-pro-preview") add("gemini-3.1-pro-preview")
-        }.distinct()
-
+        val modelsToTry = GeminiModelRegistry.buildFallbackChain(resolvedModel)
         var lastErrorMsg = "Unable to reach Gemini servers."
         var isQuotaOrKey = false
 
@@ -363,17 +394,15 @@ class GeminiApiClient {
                     val isQuotaError = responseCode == 429
                     isQuotaOrKey = isKeyError || isQuotaError
 
-                    if (!isKeyError && targetModel != modelsToTry.last()) {
-                        Log.w("GeminiApiClient", "Model $targetModel failed ($errorMsg). Trying next fallback model...")
+                    Log.w("GeminiApiClient", "Model $targetModel failed ($responseCode: $errorMsg). Auto-falling back to next model...")
+                    if (targetModel != modelsToTry.last()) {
                         continue
                     }
 
-                    if (targetModel == modelsToTry.last() || isKeyError) {
-                        return@withContext AiResult.Error(
-                            errorMsg,
-                            isQuotaOrKeyError = isQuotaOrKey
-                        )
-                    }
+                    return@withContext AiResult.Error(
+                        errorMsg,
+                        isQuotaOrKeyError = isQuotaOrKey
+                    )
                 }
 
                 val respJson = JSONObject(responseString)
@@ -440,7 +469,11 @@ class GeminiApiClient {
     }
 
     private fun autoSelectModel(userPrompt: String, hasImages: Boolean = false): String {
-        return "gemini-3.5-flash"
+        val lower = userPrompt.lowercase()
+        val isDeepReasoning = lower.contains("derive") || lower.contains("proof") || 
+                              lower.contains("integration") || lower.contains("differential") ||
+                              lower.contains("calculate the ratio") || lower.contains("jee advanced")
+        return if (isDeepReasoning) "gemini-3.1-pro-preview" else "gemini-3.7-flash"
     }
 
     suspend fun testConnection(apiKey: String, model: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
@@ -452,7 +485,7 @@ class GeminiApiClient {
             messages = testPrompt
         )
         when (result) {
-            is AiResult.Success -> Pair(true, "Success: ${result.text.take(80)}")
+            is AiResult.Success -> Pair(true, "Success (Model: ${result.modelUsed}): ${result.text.take(80)}")
             is AiResult.Error -> Pair(false, result.message)
         }
     }

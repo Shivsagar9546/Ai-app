@@ -31,15 +31,19 @@ class OmniAIApplication : Application() {
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             android.util.Log.e("OmniAI", "Uncaught exception on thread ${thread.name}", throwable)
             val msg = throwable.message ?: ""
-            val className = throwable.javaClass.simpleName
-            val isOverlayGlitch = throwable is android.view.WindowManager.BadTokenException ||
-                    (throwable is IllegalArgumentException && (msg.contains("not attached") || msg.contains("View=") || msg.contains("has already been added"))) ||
-                    (throwable is IllegalStateException && (msg.contains("ActivityResultRegistryOwner") || msg.contains("ForegroundService"))) ||
+            val className = throwable.javaClass.name
+            val isRecoverableGlitch = throwable is android.view.WindowManager.BadTokenException ||
+                    throwable is android.view.WindowManager.InvalidDisplayException ||
+                    (throwable is IllegalArgumentException && (msg.contains("not attached") || msg.contains("View=") || msg.contains("has already been added") || msg.contains("Service not registered"))) ||
+                    (throwable is IllegalStateException && (msg.contains("ActivityResultRegistryOwner") || msg.contains("ForegroundService") || msg.contains("MediaProjection") || msg.contains("Lifecycle"))) ||
                     className.contains("ForegroundService") ||
                     className.contains("BadTokenException") ||
+                    className.contains("SpeechRecognizer") ||
+                    className.contains("TextToSpeech") ||
                     throwable is android.os.TransactionTooLargeException ||
-                    throwable is android.os.DeadObjectException
-            if (!isOverlayGlitch) {
+                    throwable is android.os.DeadObjectException ||
+                    throwable is SecurityException && (msg.contains("MediaProjection") || msg.contains("FOREGROUND_SERVICE") || msg.contains("POST_NOTIFICATIONS"))
+            if (!isRecoverableGlitch) {
                 defaultHandler?.uncaughtException(thread, throwable)
             }
         }
