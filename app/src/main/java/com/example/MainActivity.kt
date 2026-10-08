@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.net.Uri
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -55,6 +57,8 @@ class MainActivity : ComponentActivity() {
         }
         navTargetState.value = initialNavTarget
 
+        handleIncomingIntent(intent)
+
         setContent {
             val adminSettings by viewModel.adminSettings.collectAsState()
             val isDark = when (adminSettings.appTheme) {
@@ -85,6 +89,70 @@ class MainActivity : ComponentActivity() {
         val target = intent.getStringExtra("NAV_TARGET")
         if (!target.isNullOrBlank()) {
             navTargetState.value = target
+        }
+        handleIncomingIntent(intent)
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.action
+        val type = intent.type
+
+        when (action) {
+            Intent.ACTION_SEND -> {
+                if (type?.startsWith("image/") == true) {
+                    val streamUri: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(Intent.EXTRA_STREAM)
+                    }
+                    val clipUri = intent.clipData?.let { cd ->
+                        if (cd.itemCount > 0) cd.getItemAt(0).uri else null
+                    }
+                    val targetUri = streamUri ?: clipUri
+                    if (targetUri != null) {
+                        viewModel.attachMultipleImageUris(listOf(targetUri))
+                    }
+                    val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+                    if (!sharedText.isNullOrBlank()) {
+                        viewModel.setPendingSharedText(sharedText)
+                    }
+                } else if (type?.startsWith("text/") == true || type == "text/plain") {
+                    val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+                    if (!sharedText.isNullOrBlank()) {
+                        viewModel.setPendingSharedText(sharedText)
+                    }
+                }
+            }
+            Intent.ACTION_SEND_MULTIPLE -> {
+                if (type?.startsWith("image/") == true) {
+                    val uris = mutableListOf<Uri>()
+                    val streamUris: ArrayList<Uri>? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
+                    }
+                    if (streamUris != null) {
+                        uris.addAll(streamUris)
+                    }
+                    intent.clipData?.let { clipData ->
+                        for (i in 0 until clipData.itemCount) {
+                            clipData.getItemAt(i).uri?.let { u ->
+                                if (!uris.contains(u)) uris.add(u)
+                            }
+                        }
+                    }
+                    if (uris.isNotEmpty()) {
+                        viewModel.attachMultipleImageUris(uris)
+                    }
+                    val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+                    if (!sharedText.isNullOrBlank()) {
+                        viewModel.setPendingSharedText(sharedText)
+                    }
+                }
+            }
         }
     }
 }

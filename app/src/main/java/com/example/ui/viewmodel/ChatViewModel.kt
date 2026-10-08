@@ -95,6 +95,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _isRefreshingOpenRouterModels = MutableStateFlow(false)
     val isRefreshingOpenRouterModels: StateFlow<Boolean> = _isRefreshingOpenRouterModels.asStateFlow()
 
+    private val _pendingSharedText = MutableStateFlow<String?>(null)
+    val pendingSharedText: StateFlow<String?> = _pendingSharedText.asStateFlow()
+
+    fun setPendingSharedText(text: String?) {
+        _pendingSharedText.value = text
+    }
+
+    fun consumePendingSharedText(): String? {
+        val current = _pendingSharedText.value
+        _pendingSharedText.value = null
+        return current
+    }
+
     init {
         viewModelScope.launch {
             adminPrefs.settingsFlow.collect { settings ->
@@ -162,12 +175,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun decodeSampledBitmap(context: Context, uri: Uri, reqWidth: Int, reqHeight: Int): Bitmap? {
         return try {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+            if (bytes.isEmpty()) return null
+
             val options = BitmapFactory.Options().apply {
                 inJustDecodeBounds = true
             }
-            context.contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, options)
-            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
 
             var inSampleSize = 1
             if (options.outHeight > reqHeight || options.outWidth > reqWidth) {
@@ -182,9 +196,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 this.inSampleSize = inSampleSize
                 inPreferredConfig = Bitmap.Config.RGB_565
             }
-            context.contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, decodeOptions)
-            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
         } catch (_: Exception) {
             null
         }

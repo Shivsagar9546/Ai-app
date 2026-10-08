@@ -156,6 +156,16 @@ fun MainChatScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
+    val pendingSharedText by viewModel.pendingSharedText.collectAsState()
+    LaunchedEffect(pendingSharedText) {
+        pendingSharedText?.let { shared ->
+            if (shared.isNotBlank()) {
+                inputText = if (inputText.isBlank()) shared else "$inputText\n$shared"
+                viewModel.consumePendingSharedText()
+            }
+        }
+    }
+
     // Check clipboard for screenshot/image on entry, whenever attachedBitmaps changes & on app resume
     LaunchedEffect(attachedBitmaps.size) {
         hasClipboardScreenshot = com.example.util.ClipboardImageHelper.hasImageInClipboard(context)
