@@ -35,7 +35,6 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.Diamond
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Psychology
@@ -97,7 +96,6 @@ fun FloatingBubbleView(
     onAreaScan: () -> Unit,
     onOcrGrabber: () -> Unit,
     onQuickHud: () -> Unit,
-    onVoiceClick: () -> Unit,
     onOpenSettings: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -231,14 +229,7 @@ fun FloatingBubbleView(
                             onQuickHud()
                         }
                     )
-                    BubbleMenuItem(
-                        icon = Icons.Default.Mic,
-                        label = "Voice Prompt",
-                        onClick = {
-                            showMenu = false
-                            onVoiceClick()
-                        }
-                    )
+
 
                     // Quick Bubble Opacity / Transparency Row
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))

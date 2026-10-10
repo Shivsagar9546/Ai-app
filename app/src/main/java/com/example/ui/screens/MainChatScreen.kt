@@ -46,12 +46,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import com.example.util.receiveImageContent
+import com.example.ui.components.RichChatInputField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
@@ -59,9 +59,9 @@ import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.Refresh
@@ -148,7 +148,6 @@ fun MainChatScreen(
     val streamingText by viewModel.streamingText.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
     val adminSettings by viewModel.adminSettings.collectAsState()
-    val isListening by viewModel.voiceHelper.isListening.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     var showAttachmentMenu by remember { mutableStateOf(false) }
@@ -185,13 +184,6 @@ fun MainChatScreen(
         if (uris.isNotEmpty()) {
             viewModel.attachMultipleImageUris(uris)
         }
-    }
-
-    // Camera Launcher
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap: Bitmap? ->
-        bitmap?.let { viewModel.addAttachedBitmaps(listOf(it)) }
     }
 
     // PDF Document Picker Launcher
@@ -417,7 +409,8 @@ fun MainChatScreen(
                                     },
                                     onRegenerate = {
                                         viewModel.regenerateLastResponse()
-                                    }
+                                    },
+                                    onOpenSettings = onNavigateToSettings
                                 )
                             }
 
@@ -515,35 +508,37 @@ fun MainChatScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 itemsIndexed(attachedBitmaps) { index, bmp ->
-                                    Box(
-                                        modifier = Modifier
-                                            .size(64.dp)
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                                    ) {
-                                        Image(
-                                            bitmap = bmp.asImageBitmap(),
-                                            contentDescription = "Photo ${index + 1}",
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                        )
-
-                                        // Close badge
+                                    if (!bmp.isRecycled) {
                                         Box(
                                             modifier = Modifier
-                                                .align(Alignment.TopEnd)
-                                                .padding(2.dp)
-                                                .size(20.dp)
-                                                .background(Color.Black.copy(alpha = 0.65f), CircleShape)
-                                                .clickable { viewModel.removeAttachedBitmapAt(index) },
-                                            contentAlignment = Alignment.Center
+                                                .size(64.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
                                         ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Close,
-                                                contentDescription = "Remove photo",
-                                                tint = Color.White,
-                                                modifier = Modifier.size(12.dp)
+                                            Image(
+                                                bitmap = bmp.asImageBitmap(),
+                                                contentDescription = "Photo ${index + 1}",
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
                                             )
+
+                                            // Close badge
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(2.dp)
+                                                    .size(20.dp)
+                                                    .background(Color.Black.copy(alpha = 0.65f), CircleShape)
+                                                    .clickable { viewModel.removeAttachedBitmapAt(index) },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Remove photo",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(12.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -680,62 +675,27 @@ fun MainChatScreen(
                             }
                         }
 
-                        // Spacious ChatGPT-Style Text Input Pill with Native Rich Content / Keyboard Paste
-                        OutlinedTextField(
+                        // Spacious Text Input Pill with Full Native Keyboard Rich-Content & Screenshot Paste (Samsung Keyboard & Gboard)
+                        RichChatInputField(
                             value = inputText,
                             onValueChange = { inputText = it },
-                            placeholder = {
-                                Text(
-                                    text = "Message...",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
+                            placeholder = "Message...",
+                            onImageReceived = { clipData ->
+                                viewModel.attachClipData(clipData)
+                            },
+                            onSend = {
+                                val canSend = inputText.isNotBlank() || attachedBitmaps.isNotEmpty()
+                                if (canSend) {
+                                    viewModel.sendMessage(inputText)
+                                    inputText = ""
+                                }
                             },
                             modifier = Modifier
                                 .weight(1f)
-                                .receiveImageContent { clipData ->
-                                    viewModel.attachClipData(clipData)
-                                }
-                                .testTag("main_chat_input"),
-                            shape = RoundedCornerShape(26.dp),
-                            maxLines = 5,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                                unfocusedBorderColor = Color.Transparent
-                            )
+                                .testTag("main_chat_input")
                         )
 
-                        // Voice Mic Button
-                        Surface(
-                            onClick = {
-                                if (isListening) {
-                                    viewModel.voiceHelper.stopListening()
-                                } else {
-                                    viewModel.voiceHelper.startListening(
-                                        languageCode = "en-IN",
-                                        onResult = { recognized ->
-                                            inputText = recognized
-                                        }
-                                    )
-                                }
-                            },
-                            shape = CircleShape,
-                            color = if (isListening) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier
-                                .size(42.dp)
-                                .testTag("main_chat_mic_button")
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Mic,
-                                    contentDescription = "Voice Input",
-                                    tint = if (isListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
+
 
                         // Send / Stop Button
                         if (isGenerating) {
@@ -785,7 +745,6 @@ fun MainChatScreen(
     if (showAttachmentMenu) {
         AttachmentBottomSheet(
             onDismiss = { showAttachmentMenu = false },
-            onCameraClick = { cameraLauncher.launch(null) },
             onGalleryClick = {
                 multipleGalleryLauncher.launch(
                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -1006,7 +965,8 @@ private fun ChatMessageCard(
     onSpeak: () -> Unit,
     onShare: () -> Unit,
     onCopyText: () -> Unit,
-    onRegenerate: () -> Unit
+    onRegenerate: () -> Unit,
+    onOpenSettings: () -> Unit = {}
 ) {
     val isUser = message.role.equals("user", ignoreCase = true)
 
@@ -1123,23 +1083,45 @@ private fun ChatMessageCard(
                         )
                         if (message.isError) {
                             Spacer(modifier = Modifier.height(8.dp))
-                            Button(
-                                onClick = onRegenerate,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.error,
-                                    contentColor = MaterialTheme.colorScheme.onError
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                modifier = Modifier.height(34.dp)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Retry",
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Retry Answer (Auto-Fallback)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Button(
+                                    onClick = onRegenerate,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.error,
+                                        contentColor = MaterialTheme.colorScheme.onError
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Retry",
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Retry", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                if (message.text.contains("API key", ignoreCase = true) || message.text.contains("key", ignoreCase = true)) {
+                                    FilledTonalButton(
+                                        onClick = onOpenSettings,
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                        modifier = Modifier.height(34.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Key,
+                                            contentDescription = "Setup Key",
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Setup API Key 🔑", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         }
                     }

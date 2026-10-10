@@ -21,7 +21,6 @@ import com.example.data.ai.AiResult
 import com.example.data.local.ChatMessage
 import com.example.data.local.Conversation
 import com.example.data.preferences.AdminSettings
-import com.example.service.VoiceRecognitionHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,7 +42,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val chatDao = app.database.chatDao()
     private val adminPrefs = app.adminPreferences
     private val aiRepository = AiRepository(adminPrefs)
-    val voiceHelper = VoiceRecognitionHelper(application)
 
     val adminSettings: StateFlow<AdminSettings> = adminPrefs.settingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AdminSettings())
@@ -228,17 +226,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearAttachedBitmaps() {
-        val oldBitmaps = _attachedBitmaps.value
-        val oldSingle = _attachedBitmap.value
         _attachedBitmap.value = null
         _attachedBitmaps.value = emptyList()
-        viewModelScope.launch(Dispatchers.Default) {
-            (oldBitmaps + listOfNotNull(oldSingle)).distinct().forEach { bmp ->
-                try {
-                    if (!bmp.isRecycled) bmp.recycle()
-                } catch (_: Exception) {}
-            }
-        }
     }
 
     fun pasteFromClipboard() {
@@ -378,14 +367,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _statusMessage.value = null
             _streamingText.value = null
 
-            // Free bitmap memory immediately
-            withContext(Dispatchers.Default) {
-                images.forEach { bmp ->
-                    try {
-                        if (!bmp.isRecycled) bmp.recycle()
-                    } catch (_: Exception) {}
-                }
-            }
+
 
             when (result) {
                 is AiResult.Success -> {

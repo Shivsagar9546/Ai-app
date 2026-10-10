@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -41,7 +40,6 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun AttachmentBottomSheet(
     onDismiss: () -> Unit,
-    onCameraClick: () -> Unit,
     onGalleryClick: () -> Unit,
     onPdfClick: () -> Unit,
     onPasteClipboardClick: () -> Unit = {},
@@ -71,11 +69,11 @@ fun AttachmentBottomSheet(
             // Grid of items
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 AttachmentItem(
-                    title = "Paste Image",
-                    icon = Icons.Default.ContentPaste,
+                    title = "Paste Screenshot",
+                    icon = Icons.Default.Screenshot,
                     backgroundColor = Color(0xFF10B981),
                     testTag = "attach_item_paste",
                     onClick = {
@@ -92,17 +90,6 @@ fun AttachmentBottomSheet(
                     onClick = {
                         onDismiss()
                         onGalleryClick()
-                    }
-                )
-
-                AttachmentItem(
-                    title = "Camera",
-                    icon = Icons.Default.CameraAlt,
-                    backgroundColor = Color(0xFF3B82F6),
-                    testTag = "attach_item_camera",
-                    onClick = {
-                        onDismiss()
-                        onCameraClick()
                     }
                 )
 

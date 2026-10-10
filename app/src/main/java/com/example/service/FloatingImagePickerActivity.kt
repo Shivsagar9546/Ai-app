@@ -69,35 +69,7 @@ class FloatingImagePickerActivity : ComponentActivity() {
         }
     }
 
-    private val requestCameraPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            try {
-                takePhotoLauncher.launch(null)
-            } catch (e: Exception) {
-                Toast.makeText(this, "Camera not available: ${e.message}", Toast.LENGTH_SHORT).show()
-                FloatingAssistantService.activeServiceInstance?.showPopup()
-                safeFinish()
-            }
-        } else {
-            Toast.makeText(this, "Camera permission needed to take photos", Toast.LENGTH_SHORT).show()
-            FloatingAssistantService.activeServiceInstance?.showPopup()
-            safeFinish()
-        }
-    }
 
-    private val takePhotoLauncher = registerForActivityResult(
-        ActivityResultContracts.TakePicturePreview()
-    ) { bitmap: Bitmap? ->
-        if (bitmap != null) {
-            val scaled = scaleDownBitmap(bitmap, 1280)
-            onImageSelectedCallback?.invoke(scaled)
-        } else {
-            FloatingAssistantService.activeServiceInstance?.showPopup()
-        }
-        safeFinish()
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,18 +86,7 @@ class FloatingImagePickerActivity : ComponentActivity() {
                     safeFinish()
                 }
             }
-            MODE_CAMERA -> {
-                if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-                    try {
-                        takePhotoLauncher.launch(null)
-                    } catch (e: Exception) {
-                        Toast.makeText(this, "Cannot open camera: ${e.message}", Toast.LENGTH_SHORT).show()
-                        safeFinish()
-                    }
-                } else {
-                    requestCameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                }
-            }
+
             else -> {
                 try {
                     pickVisualMediaLauncher.launch(
@@ -414,7 +375,6 @@ class FloatingImagePickerActivity : ComponentActivity() {
     companion object {
         const val EXTRA_MODE = "extra_mode"
         const val MODE_GALLERY = "mode_gallery"
-        const val MODE_CAMERA = "mode_camera"
         const val MODE_SCREEN_CAPTURE = "mode_screen_capture"
 
         private var onImageSelectedCallback: ((Bitmap) -> Unit)? = null
@@ -432,15 +392,6 @@ class FloatingImagePickerActivity : ComponentActivity() {
             onImageSelectedCallback = onPicked
             val intent = Intent(context, FloatingImagePickerActivity::class.java).apply {
                 putExtra(EXTRA_MODE, MODE_GALLERY)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
-            }
-            context.startActivity(intent)
-        }
-
-        fun launchCameraPicker(context: Context, onPicked: (Bitmap) -> Unit) {
-            onImageSelectedCallback = onPicked
-            val intent = Intent(context, FloatingImagePickerActivity::class.java).apply {
-                putExtra(EXTRA_MODE, MODE_CAMERA)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
             }
             context.startActivity(intent)

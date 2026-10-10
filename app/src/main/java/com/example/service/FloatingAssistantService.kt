@@ -102,7 +102,6 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
 
     private lateinit var aiRepository: AiRepository
-    private lateinit var voiceHelper: VoiceRecognitionHelper
     private var textToSpeech: TextToSpeech? = null
 
     // Overlay Views
@@ -170,7 +169,6 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val app = application as OmniAIApplication
         aiRepository = AiRepository(app.adminPreferences)
-        voiceHelper = VoiceRecognitionHelper(this)
 
         try {
             textToSpeech = TextToSpeech(this, this)
@@ -528,9 +526,6 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         onQuickHud = {
                             startQuickHudSolve(null)
                         },
-                        onVoiceClick = {
-                            startVoiceQuery()
-                        },
                         onOpenSettings = {
                             val intent = Intent(this@FloatingAssistantService, MainActivity::class.java).apply {
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -653,16 +648,6 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                                 _attachedImage.value = bitmap
                                 showPopup()
                             }
-                        },
-                        onTakePhoto = {
-                            popupView?.visibility = View.GONE
-                            FloatingImagePickerActivity.launchCameraPicker(this@FloatingAssistantService) { bitmap ->
-                                _attachedImage.value = bitmap
-                                showPopup()
-                            }
-                        },
-                        onVoiceInput = {
-                            startVoiceQuery()
                         },
                         onSpeakText = { text ->
                             if (text.isBlank()) {
@@ -1534,16 +1519,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         }
     }
 
-    fun startVoiceQuery() {
-        voiceHelper.startListening(
-            languageCode = "en-US",
-            onResult = { recognizedText ->
-                if (recognizedText.isNotBlank()) {
-                    sendMessage(recognizedText)
-                }
-            }
-        )
-    }
+
 
     private fun captureScreenshotHelper(
         onSuccess: (Bitmap) -> Unit
@@ -1585,9 +1561,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             } catch (e: Exception) {}
             bubbleView = null
         }
-        try {
-            voiceHelper.stopListening()
-        } catch (e: Exception) {}
+
         try {
             textToSpeech?.stop()
             textToSpeech?.shutdown()

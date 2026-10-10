@@ -70,6 +70,10 @@ object ClipboardImageHelper {
                             return true
                         }
                     }
+                    val textStr = item?.text?.toString()?.trim() ?: ""
+                    if (textStr.startsWith("content://") && (textStr.contains("image") || textStr.contains("screenshot") || textStr.contains("media"))) {
+                        return true
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -163,6 +167,17 @@ object ClipboardImageHelper {
                         bitmaps.add(bmp)
                     }
                 }
+            }
+
+            // 3. Check if item text is a direct image URI string
+            val textStr = item.text?.toString()?.trim() ?: ""
+            if (textStr.startsWith("content://") || textStr.startsWith("file://")) {
+                try {
+                    val parsedUri = Uri.parse(textStr)
+                    decodeSampledBitmapFromUri(context, parsedUri, maxDim, maxDim)?.let { bmp ->
+                        bitmaps.add(bmp)
+                    }
+                } catch (_: Exception) {}
             }
         }
         bitmaps

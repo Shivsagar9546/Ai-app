@@ -35,7 +35,6 @@ import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
@@ -44,7 +43,6 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
@@ -134,8 +132,6 @@ fun FloatingPopUpView(
     onOcrGrabber: () -> Unit = {},
     onQuickHud: () -> Unit = {},
     onPickGalleryImage: () -> Unit = {},
-    onTakePhoto: () -> Unit = {},
-    onVoiceInput: () -> Unit,
     onSpeakText: (String) -> Unit = {},
     onClearMessages: () -> Unit = {},
     onRegenerate: () -> Unit = {},
@@ -575,39 +571,41 @@ fun FloatingPopUpView(
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     itemsIndexed(attachedBitmaps) { index, bmp ->
-                                        Box(
-                                            modifier = Modifier.size(56.dp)
-                                        ) {
-                                            Image(
-                                                bitmap = bmp.asImageBitmap(),
-                                                contentDescription = "Attached photo preview",
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .border(
-                                                        1.dp,
-                                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                                                        RoundedCornerShape(8.dp)
-                                                    ),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                            IconButton(
-                                                onClick = {
-                                                    val mutable = attachedBitmaps.toMutableList()
-                                                    mutable.removeAt(index)
-                                                    attachedBitmaps = mutable
-                                                },
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .size(16.dp)
-                                                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                        if (!bmp.isRecycled) {
+                                            Box(
+                                                modifier = Modifier.size(56.dp)
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Close,
-                                                    contentDescription = "Remove photo",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(10.dp)
+                                                Image(
+                                                    bitmap = bmp.asImageBitmap(),
+                                                    contentDescription = "Attached photo preview",
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .border(
+                                                            1.dp,
+                                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                                            RoundedCornerShape(8.dp)
+                                                        ),
+                                                    contentScale = ContentScale.Crop
                                                 )
+                                                IconButton(
+                                                    onClick = {
+                                                        val mutable = attachedBitmaps.toMutableList()
+                                                        mutable.removeAt(index)
+                                                        attachedBitmaps = mutable
+                                                    },
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .size(16.dp)
+                                                        .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Close,
+                                                        contentDescription = "Remove photo",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(10.dp)
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -809,21 +807,7 @@ fun FloatingPopUpView(
                                     )
                                 )
 
-                                // Mic Button
-                                IconButton(
-                                    onClick = onVoiceInput,
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
-                                        .testTag("popup_mic_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Mic,
-                                        contentDescription = "Voice Input",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
+
 
                                 // Send Button
                                 FilledIconButton(
