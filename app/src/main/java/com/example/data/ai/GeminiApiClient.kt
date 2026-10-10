@@ -14,12 +14,12 @@ import java.util.concurrent.TimeUnit
 
 object GeminiModelRegistry {
     val ACTIVE_MODELS = listOf(
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview",
         "gemini-2.5-flash",
-        "gemini-2.0-flash",
+        "gemini-3.1-flash-lite-preview",
         "gemini-2.5-pro",
-        "gemini-2.0-flash-lite",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro"
+        "gemini-flash-latest"
     )
 
     val DEPRECATED_OR_INVALID_MODELS = setOf(
@@ -27,14 +27,19 @@ object GeminiModelRegistry {
         "gemini-1.0-pro-vision",
         "gemini-pro",
         "gemini-pro-vision",
-        "gemini-3.5-flash",
-        "gemini-flash-latest",
-        "gemini-pro-latest"
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-2.0-flash",
+        "gemini-2.0-pro",
+        "gemini-2.0-flash-thinking",
+        "gemini-2.0-flash-lite"
     )
 
     fun isDeprecated(model: String): Boolean {
         val lower = model.trim().lowercase()
-        return DEPRECATED_OR_INVALID_MODELS.contains(lower) || lower.startsWith("gemini-1.0")
+        return DEPRECATED_OR_INVALID_MODELS.contains(lower) || 
+               lower.startsWith("gemini-1.") || 
+               lower.startsWith("gemini-2.0")
     }
 
     fun buildFallbackChain(requestedModel: String): List<String> {
@@ -468,20 +473,23 @@ class GeminiApiClient {
         val lower = userPrompt.lowercase()
         val isDeepReasoning = lower.contains("derive") || lower.contains("proof") || 
                               lower.contains("integration") || lower.contains("differential") ||
-                              lower.contains("calculate the ratio") || lower.contains("jee advanced")
-        return if (isDeepReasoning) "gemini-2.5-pro" else "gemini-2.5-flash"
+                              lower.contains("calculate") || lower.contains("code") ||
+                              lower.contains("solve") || lower.contains("math") ||
+                              lower.contains("explain step by step")
+        return if (isDeepReasoning) "gemini-3.1-pro-preview" else "gemini-3.5-flash"
     }
 
     suspend fun testConnection(apiKey: String, model: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         val testPrompt = listOf(AiMessage(role = "user", text = "Hi! Please reply with 'Gemini connection successful'"))
+        val cleanModel = if (model == "auto" || model.isBlank() || GeminiModelRegistry.isDeprecated(model)) "gemini-3.5-flash" else model
         val result = generateContent(
-            apiKeyOverride = apiKey,
-            model = model,
+            apiKeyOverride = apiKey.ifBlank { null },
+            model = cleanModel,
             systemPrompt = "You are a test agent. Keep answer short.",
             messages = testPrompt
         )
         when (result) {
-            is AiResult.Success -> Pair(true, "Success (Model: ${result.modelUsed}): ${result.text.take(80)}")
+            is AiResult.Success -> Pair(true, "Active & Working ✅ (Model: ${result.modelUsed}): ${result.text.take(60)}")
             is AiResult.Error -> Pair(false, result.message)
         }
     }

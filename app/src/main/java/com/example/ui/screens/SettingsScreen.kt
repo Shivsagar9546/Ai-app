@@ -25,7 +25,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
@@ -78,19 +80,21 @@ fun SettingsScreen(
     var showApiKeyDialog by remember { mutableStateOf(false) }
     var apiKeyInput by remember(adminSettings.geminiApiKey) { mutableStateOf(adminSettings.geminiApiKey) }
 
+    val testResult by viewModel.testApiResult.collectAsState()
+
     if (showApiKeyDialog) {
         AlertDialog(
             onDismissRequest = { showApiKeyDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(imageVector = Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Text("Gemini API Key")
+                    Text("Gemini API Key Setup")
                 }
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Paste your Google Gemini API key below. You can get a free key from Google AI Studio (aistudio.google.com).",
+                        "Enter your Gemini API Key from Google AI Studio (aistudio.google.com/apikey). It usually starts with AIzaSy...",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -106,16 +110,26 @@ fun SettingsScreen(
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.updateAdminSettings(geminiApiKey = apiKeyInput.trim())
-                        showApiKeyDialog = false
-                        android.widget.Toast.makeText(context, "API Key saved successfully!", android.widget.Toast.LENGTH_SHORT).show()
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.testTag("save_api_key_button")
-                ) {
-                    Text("Save Key")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.testGeminiConnection(apiKeyInput.trim(), adminSettings.geminiModel)
+                        },
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Test Key")
+                    }
+                    Button(
+                        onClick = {
+                            viewModel.updateAdminSettings(geminiApiKey = apiKeyInput.trim())
+                            showApiKeyDialog = false
+                            android.widget.Toast.makeText(context, "API Key saved successfully!", android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("save_api_key_button")
+                    ) {
+                        Text("Save Key")
+                    }
                 }
             },
             dismissButton = {
@@ -187,7 +201,7 @@ fun SettingsScreen(
                             Text(
                                 text = if (adminSettings.geminiApiKey.isNotBlank()) 
                                     adminSettings.maskKey(adminSettings.geminiApiKey) 
-                                else "Not configured (Using default key)",
+                                else "Not configured (Set your free API key)",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (adminSettings.geminiApiKey.isNotBlank()) 
                                     MaterialTheme.colorScheme.primary 
@@ -195,17 +209,28 @@ fun SettingsScreen(
                             )
                         }
 
-                        Button(
-                            onClick = { 
-                                apiKeyInput = adminSettings.geminiApiKey
-                                showApiKeyDialog = true 
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.testTag("settings_open_api_key_dialog_button")
-                        ) {
-                            Icon(imageVector = Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(if (adminSettings.geminiApiKey.isNotBlank()) "Change" else "Setup Key")
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.testGeminiConnection(adminSettings.geminiApiKey, adminSettings.geminiModel)
+                                },
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Test")
+                            }
+
+                            Button(
+                                onClick = { 
+                                    apiKeyInput = adminSettings.geminiApiKey
+                                    showApiKeyDialog = true 
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.testTag("settings_open_api_key_dialog_button")
+                            ) {
+                                Icon(imageVector = Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(if (adminSettings.geminiApiKey.isNotBlank()) "Change" else "Setup")
+                            }
                         }
                     }
 
@@ -225,6 +250,31 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+
+                    // Connection test status
+                    if (testResult != null) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (testResult!!.second) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (testResult!!.second) Icons.Default.CheckCircle else Icons.Default.Error,
+                                    contentDescription = null,
+                                    tint = if (testResult!!.second) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                )
+                                Text(
+                                    text = testResult!!.first,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
                     }
                 }
             }

@@ -107,11 +107,10 @@ fun AdminPanelScreen(
         mutableStateOf(
             if (adminSettings.geminiModel != "auto" &&
                 adminSettings.geminiModel != "gemini-2.5-flash" &&
-                adminSettings.geminiModel != "gemini-2.0-flash" &&
+                adminSettings.geminiModel != "gemini-3.5-flash" &&
                 adminSettings.geminiModel != "gemini-2.5-pro" &&
-                adminSettings.geminiModel != "gemini-2.0-flash-lite" &&
-                adminSettings.geminiModel != "gemini-1.5-flash" &&
-                adminSettings.geminiModel != "gemini-1.5-pro"
+                adminSettings.geminiModel != "gemini-3.1-pro-preview" &&
+                adminSettings.geminiModel != "gemini-3.1-flash-lite-preview"
             ) {
                 adminSettings.geminiModel
             } else {
@@ -502,29 +501,24 @@ fun AdminPanelScreen(
                                     label = { Text("gemini-2.5-flash (Ultra ⚡)") }
                                 )
                                 FilterChip(
-                                    selected = adminSettings.geminiModel == "gemini-2.0-flash",
-                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-2.0-flash") },
-                                    label = { Text("gemini-2.0-flash (Multimodal 🚀)") }
+                                    selected = adminSettings.geminiModel == "gemini-3.5-flash",
+                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-3.5-flash") },
+                                    label = { Text("gemini-3.5-flash (Latest 🚀)") }
                                 )
                                 FilterChip(
                                     selected = adminSettings.geminiModel == "gemini-2.5-pro",
                                     onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-2.5-pro") },
-                                    label = { Text("gemini-2.5-pro (Deep Reasoning 🎯)") }
+                                    label = { Text("gemini-2.5-pro (Reasoning 🎯)") }
                                 )
                                 FilterChip(
-                                    selected = adminSettings.geminiModel == "gemini-2.0-flash-lite",
-                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-2.0-flash-lite") },
-                                    label = { Text("gemini-2.0-flash-lite (Fast)") }
+                                    selected = adminSettings.geminiModel == "gemini-3.1-pro-preview",
+                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-3.1-pro-preview") },
+                                    label = { Text("gemini-3.1-pro (Deep 📚)") }
                                 )
                                 FilterChip(
-                                    selected = adminSettings.geminiModel == "gemini-1.5-flash",
-                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-1.5-flash") },
-                                    label = { Text("gemini-1.5-flash (High Quota 🛡️)") }
-                                )
-                                FilterChip(
-                                    selected = adminSettings.geminiModel == "gemini-1.5-pro",
-                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-1.5-pro") },
-                                    label = { Text("gemini-1.5-pro (Deep Context 📚)") }
+                                    selected = adminSettings.geminiModel == "gemini-3.1-flash-lite-preview",
+                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-3.1-flash-lite-preview") },
+                                    label = { Text("gemini-3.1-flash-lite (Fast ⚡)") }
                                 )
                             }
 

@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import com.example.util.receiveImageContent
+import com.example.ui.components.RichChatInputField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -775,36 +776,30 @@ fun FloatingPopUpView(
                                     )
                                 }
 
-                                OutlinedTextField(
+                                RichChatInputField(
                                     value = inputText,
                                     onValueChange = { inputText = it },
-                                    placeholder = {
-                                        Text(
-                                            text = if (attachedBitmaps.isNotEmpty()) "Ask about these photos..." else "Ask about screen or type...",
-                                            fontSize = 13.sp
-                                        )
+                                    placeholder = if (attachedBitmaps.isNotEmpty()) "Ask about these photos..." else "Ask about screen or type...",
+                                    onImageReceived = { clipData ->
+                                        coroutineScope.launch {
+                                            val bitmaps = com.example.util.ClipboardImageHelper.extractBitmapsFromClipData(context, clipData)
+                                            if (bitmaps.isNotEmpty()) {
+                                                attachedBitmaps = (attachedBitmaps + bitmaps).take(10)
+                                                Toast.makeText(context, "Pasted ${bitmaps.size} image(s)", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    },
+                                    onSend = {
+                                        val prompt = inputText.trim()
+                                        if (prompt.isNotBlank() || attachedBitmaps.isNotEmpty()) {
+                                            onSendMessage(prompt, null, attachedBitmaps)
+                                            inputText = ""
+                                            attachedBitmaps = emptyList()
+                                        }
                                     },
                                     modifier = Modifier
                                         .weight(1f)
-                                        .receiveImageContent { clipData ->
-                                            coroutineScope.launch {
-                                                val bitmaps = com.example.util.ClipboardImageHelper.extractBitmapsFromClipData(context, clipData)
-                                                if (bitmaps.isNotEmpty()) {
-                                                    attachedBitmaps = (attachedBitmaps + bitmaps).take(10)
-                                                    Toast.makeText(context, "Pasted ${bitmaps.size} image(s)", Toast.LENGTH_SHORT).show()
-                                                }
-                                            }
-                                        }
-                                        .testTag("popup_input_field"),
-                                    shape = RoundedCornerShape(20.dp),
-                                    singleLine = false,
-                                    maxLines = 3,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedContainerColor = MaterialTheme.colorScheme.surface,
-                                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                                    )
+                                        .testTag("popup_input_field")
                                 )
 
 
