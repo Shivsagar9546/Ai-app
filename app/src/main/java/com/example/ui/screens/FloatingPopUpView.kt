@@ -142,13 +142,14 @@ fun FloatingPopUpView(
     onDragHeader: (dx: Float, dy: Float) -> Unit,
     onResize: (dw: Float, dh: Float, dx: Float, dy: Float) -> Unit,
     onAlphaChanged: (Float) -> Unit = {},
+    initialAlpha: Float = 1.0f,
     externalAttachedBitmap: Bitmap? = null,
     onClearExternalAttachedBitmap: () -> Unit = {}
 ) {
     var inputText by remember { mutableStateOf("") }
     var attachedBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
     var currentlySpeakingText by remember { mutableStateOf<String?>(null) }
-    var windowAlpha by remember { mutableStateOf(1.0f) }
+    var windowAlpha by remember(initialAlpha) { mutableStateOf(initialAlpha) }
     var isTransparencySliderOpen by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val context = LocalContext.current

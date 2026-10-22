@@ -77,8 +77,11 @@ fun SettingsScreen(
     val context = LocalContext.current
     val adminSettings by viewModel.adminSettings.collectAsState()
 
-    var showApiKeyDialog by remember { mutableStateOf(false) }
     var apiKeyInput by remember(adminSettings.geminiApiKey) { mutableStateOf(adminSettings.geminiApiKey) }
+    var apiKeyInput2 by remember(adminSettings.geminiApiKey2) { mutableStateOf(adminSettings.geminiApiKey2) }
+    var apiKeyInput3 by remember(adminSettings.geminiApiKey3) { mutableStateOf(adminSettings.geminiApiKey3) }
+    var apiKeyInput4 by remember(adminSettings.geminiApiKey4) { mutableStateOf(adminSettings.geminiApiKey4) }
+    var showApiKeyDialog by remember { mutableStateOf(false) }
 
     val testResult by viewModel.testApiResult.collectAsState()
 
@@ -94,18 +97,45 @@ fun SettingsScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Enter your Gemini API Key from Google AI Studio (aistudio.google.com/apikey). It usually starts with AIzaSy...",
+                        "Configure up to 4 Gemini API Keys. If Key 1 hits rate limit or quota, Key 2, 3, and 4 will automatically answer seamlessly.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     OutlinedTextField(
                         value = apiKeyInput,
                         onValueChange = { apiKeyInput = it },
-                        label = { Text("API Key") },
+                        label = { Text("API Key 1 (Primary)") },
                         placeholder = { Text("AIzaSy...") },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().testTag("settings_api_key_input")
+                        modifier = Modifier.fillMaxWidth().testTag("settings_api_key_input_1")
+                    )
+                    OutlinedTextField(
+                        value = apiKeyInput2,
+                        onValueChange = { apiKeyInput2 = it },
+                        label = { Text("API Key 2 (Backup 1)") },
+                        placeholder = { Text("Optional second key") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("settings_api_key_input_2")
+                    )
+                    OutlinedTextField(
+                        value = apiKeyInput3,
+                        onValueChange = { apiKeyInput3 = it },
+                        label = { Text("API Key 3 (Backup 2)") },
+                        placeholder = { Text("Optional third key") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("settings_api_key_input_3")
+                    )
+                    OutlinedTextField(
+                        value = apiKeyInput4,
+                        onValueChange = { apiKeyInput4 = it },
+                        label = { Text("API Key 4 (Backup 3)") },
+                        placeholder = { Text("Optional fourth key") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("settings_api_key_input_4")
                     )
                 }
             },
@@ -113,7 +143,9 @@ fun SettingsScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = {
-                            viewModel.testGeminiConnection(apiKeyInput.trim(), adminSettings.geminiModel)
+                            val keyToTest = listOf(apiKeyInput, apiKeyInput2, apiKeyInput3, apiKeyInput4)
+                                .firstOrNull { it.isNotBlank() } ?: ""
+                            viewModel.testGeminiConnection(keyToTest.trim(), adminSettings.geminiModel)
                         },
                         shape = RoundedCornerShape(10.dp)
                     ) {
@@ -121,14 +153,19 @@ fun SettingsScreen(
                     }
                     Button(
                         onClick = {
-                            viewModel.updateAdminSettings(geminiApiKey = apiKeyInput.trim())
+                            viewModel.updateAdminSettings(
+                                geminiApiKey = apiKeyInput.trim(),
+                                geminiApiKey2 = apiKeyInput2.trim(),
+                                geminiApiKey3 = apiKeyInput3.trim(),
+                                geminiApiKey4 = apiKeyInput4.trim()
+                            )
                             showApiKeyDialog = false
-                            android.widget.Toast.makeText(context, "API Key saved successfully!", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(context, "API Keys saved successfully!", android.widget.Toast.LENGTH_SHORT).show()
                         },
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.testTag("save_api_key_button")
                     ) {
-                        Text("Save Key")
+                        Text("Save Keys")
                     }
                 }
             },
@@ -194,16 +231,17 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
+                            val activeKeys = adminSettings.getActiveGeminiApiKeys()
                             Text(
-                                text = "Gemini API Key",
+                                text = "Gemini Multi-Key Pool (${activeKeys.size}/4 Configured)",
                                 style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
                             )
                             Text(
-                                text = if (adminSettings.geminiApiKey.isNotBlank()) 
-                                    adminSettings.maskKey(adminSettings.geminiApiKey) 
-                                else "Not configured (Set your free API key)",
+                                text = if (activeKeys.isNotEmpty()) 
+                                    "${activeKeys.size} key(s) active with auto-failover rotation"
+                                else "Not configured (Set your free API keys)",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (adminSettings.geminiApiKey.isNotBlank()) 
+                                color = if (activeKeys.isNotEmpty()) 
                                     MaterialTheme.colorScheme.primary 
                                 else MaterialTheme.colorScheme.onSurfaceVariant
                             )

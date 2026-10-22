@@ -113,6 +113,17 @@ fun FloatingBubbleView(
         }
     }
 
+    val presetLetter = remember(presetIcon) {
+        val lower = presetIcon.lowercase()
+        if (lower.startsWith("letter_")) {
+            lower.removePrefix("letter_").uppercase()
+        } else if (lower.length == 1 && lower[0].isLetter()) {
+            lower.uppercase()
+        } else {
+            null
+        }
+    }
+
     val iconVector = remember(presetIcon) {
         when (presetIcon.lowercase()) {
             "robot" -> Icons.Default.SmartToy
@@ -126,27 +137,32 @@ fun FloatingBubbleView(
         }
     }
 
-    val paddingH = when (bubbleSize) {
+    val paddingH = when (bubbleSize.lowercase()) {
+        "xs", "micro", "tiny" -> 4.dp
         "small" -> 10.dp
         "large" -> 18.dp
         else -> 14.dp
     }
-    val paddingV = when (bubbleSize) {
+    val paddingV = when (bubbleSize.lowercase()) {
+        "xs", "micro", "tiny" -> 2.dp
         "small" -> 6.dp
         "large" -> 12.dp
         else -> 9.dp
     }
-    val fontSize = when (bubbleSize) {
+    val fontSize = when (bubbleSize.lowercase()) {
+        "xs", "micro", "tiny" -> 9.5.sp
         "small" -> 12.sp
         "large" -> 15.sp
         else -> 13.5.sp
     }
-    val iconSize = when (bubbleSize) {
+    val iconSize = when (bubbleSize.lowercase()) {
+        "xs", "micro", "tiny" -> 11.dp
         "small" -> 16.dp
         "large" -> 22.dp
         else -> 18.dp
     }
-    val circleSize = when (bubbleSize) {
+    val circleSize = when (bubbleSize.lowercase()) {
+        "xs", "micro", "tiny" -> 28.dp
         "small" -> 42.dp
         "large" -> 58.dp
         else -> 48.dp
@@ -401,6 +417,13 @@ fun FloatingBubbleView(
                                     .fillMaxDimensions()
                                     .clip(CircleShape)
                             )
+                        } else if (presetLetter != null) {
+                            Text(
+                                text = presetLetter,
+                                color = Color.White,
+                                fontSize = (circleSize.value * 0.42f).sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
                         } else {
                             Icon(
                                 imageVector = iconVector,
@@ -443,6 +466,13 @@ fun FloatingBubbleView(
                                 modifier = Modifier
                                     .fillMaxDimensions()
                                     .clip(shape)
+                            )
+                        } else if (presetLetter != null) {
+                            Text(
+                                text = presetLetter,
+                                color = Color.White,
+                                fontSize = (circleSize.value * 0.42f).sp,
+                                fontWeight = FontWeight.ExtraBold
                             )
                         } else {
                             Icon(
@@ -490,6 +520,13 @@ fun FloatingBubbleView(
                                         .size(iconSize + 4.dp)
                                         .clip(CircleShape)
                                         .border(1.dp, Color.White, CircleShape)
+                                )
+                            } else if (presetLetter != null) {
+                                Text(
+                                    text = presetLetter,
+                                    color = Color.White,
+                                    fontSize = fontSize * 1.15f,
+                                    fontWeight = FontWeight.ExtraBold
                                 )
                             } else {
                                 Icon(

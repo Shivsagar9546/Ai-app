@@ -119,6 +119,9 @@ fun AdminPanelScreen(
         )
     }
     var geminiKeyInput by remember(adminSettings.geminiApiKey) { mutableStateOf(adminSettings.geminiApiKey) }
+    var geminiKeyInput2 by remember(adminSettings.geminiApiKey2) { mutableStateOf(adminSettings.geminiApiKey2) }
+    var geminiKeyInput3 by remember(adminSettings.geminiApiKey3) { mutableStateOf(adminSettings.geminiApiKey3) }
+    var geminiKeyInput4 by remember(adminSettings.geminiApiKey4) { mutableStateOf(adminSettings.geminiApiKey4) }
     var openAiKeyInput by remember(adminSettings.openAiApiKey) { mutableStateOf(adminSettings.openAiApiKey) }
     var poeKeyInput by remember(adminSettings.poeApiKey) { mutableStateOf(adminSettings.poeApiKey) }
     var openRouterKeyInput by remember(adminSettings.openRouterApiKey) { mutableStateOf(adminSettings.openRouterApiKey) }
@@ -541,12 +544,23 @@ fun AdminPanelScreen(
                             )
                         }
 
-                        // API Key Field with Masking
+                        Text(
+                            text = "Gemini Multi-API Key Rotation Pool (4 Keys)",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "If Key 1 hits rate limit (429) or quota exhausted, the system automatically switches to Key 2, Key 3, and Key 4 without user disruption.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        // API Key 1 (Primary)
                         OutlinedTextField(
                             value = geminiKeyInput,
                             onValueChange = { geminiKeyInput = it },
-                            label = { Text("Gemini API Key Override") },
-                            placeholder = { Text("Uses BuildConfig.GEMINI_API_KEY if empty") },
+                            label = { Text("Gemini API Key 1 (Primary)") },
+                            placeholder = { Text("AIzaSy...") },
                             visualTransformation = if (showGeminiKey) VisualTransformation.None else PasswordVisualTransformation(),
                             trailingIcon = {
                                 IconButton(onClick = { showGeminiKey = !showGeminiKey }) {
@@ -556,8 +570,45 @@ fun AdminPanelScreen(
                                     )
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth().testTag("gemini_api_key_input"),
-                            shape = RoundedCornerShape(12.dp)
+                            modifier = Modifier.fillMaxWidth().testTag("gemini_api_key_input_1"),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true
+                        )
+
+                        // API Key 2 (Backup 1)
+                        OutlinedTextField(
+                            value = geminiKeyInput2,
+                            onValueChange = { geminiKeyInput2 = it },
+                            label = { Text("Gemini API Key 2 (Backup 1)") },
+                            placeholder = { Text("Optional second key") },
+                            visualTransformation = if (showGeminiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth().testTag("gemini_api_key_input_2"),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true
+                        )
+
+                        // API Key 3 (Backup 2)
+                        OutlinedTextField(
+                            value = geminiKeyInput3,
+                            onValueChange = { geminiKeyInput3 = it },
+                            label = { Text("Gemini API Key 3 (Backup 2)") },
+                            placeholder = { Text("Optional third key") },
+                            visualTransformation = if (showGeminiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth().testTag("gemini_api_key_input_3"),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true
+                        )
+
+                        // API Key 4 (Backup 3)
+                        OutlinedTextField(
+                            value = geminiKeyInput4,
+                            onValueChange = { geminiKeyInput4 = it },
+                            label = { Text("Gemini API Key 4 (Backup 3)") },
+                            placeholder = { Text("Optional fourth key") },
+                            visualTransformation = if (showGeminiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth().testTag("gemini_api_key_input_4"),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true
                         )
 
                         Row(
@@ -566,19 +617,26 @@ fun AdminPanelScreen(
                         ) {
                             Button(
                                 onClick = {
-                                    viewModel.updateAdminSettings(geminiApiKey = geminiKeyInput.trim())
-                                    Toast.makeText(context, "Gemini key updated", Toast.LENGTH_SHORT).show()
+                                    viewModel.updateAdminSettings(
+                                        geminiApiKey = geminiKeyInput.trim(),
+                                        geminiApiKey2 = geminiKeyInput2.trim(),
+                                        geminiApiKey3 = geminiKeyInput3.trim(),
+                                        geminiApiKey4 = geminiKeyInput4.trim()
+                                    )
+                                    Toast.makeText(context, "All Gemini API keys saved successfully!", Toast.LENGTH_SHORT).show()
                                 },
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Save Key")
+                                Text("Save All 4 Keys")
                             }
 
                             OutlinedButton(
                                 onClick = {
-                                    viewModel.testGeminiConnection(geminiKeyInput.trim(), adminSettings.geminiModel)
+                                    val keyToTest = listOf(geminiKeyInput, geminiKeyInput2, geminiKeyInput3, geminiKeyInput4)
+                                        .firstOrNull { it.isNotBlank() } ?: ""
+                                    viewModel.testGeminiConnection(keyToTest.trim(), adminSettings.geminiModel)
                                 },
                                 modifier = Modifier.weight(1f)
                             ) {

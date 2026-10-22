@@ -76,24 +76,14 @@ class AiRepository(
 
         // Prepare Gemini Keys to try
         val geminiKeys = mutableListOf<String>()
-        if (settings.geminiApiKey.isNotBlank()) {
-            geminiKeys.add(settings.geminiApiKey)
-        }
-        if (advanced.geminiApiKey2.isNotBlank()) {
-            geminiKeys.add(advanced.geminiApiKey2)
-        }
-        if (advanced.geminiApiKey3.isNotBlank()) {
-            geminiKeys.add(advanced.geminiApiKey3)
-        }
-        if (advanced.geminiApiKey4.isNotBlank()) {
-            geminiKeys.add(advanced.geminiApiKey4)
-        }
-        if (advanced.geminiApiKey5.isNotBlank()) {
-            geminiKeys.add(advanced.geminiApiKey5)
-        }
-        if (geminiKeys.isEmpty()) {
-            geminiKeys.add("") // try fallback / default key
-        }
+        if (settings.geminiApiKey.isNotBlank()) geminiKeys.add(settings.geminiApiKey)
+        if (settings.geminiApiKey2.isNotBlank()) geminiKeys.add(settings.geminiApiKey2)
+        if (settings.geminiApiKey3.isNotBlank()) geminiKeys.add(settings.geminiApiKey3)
+        if (settings.geminiApiKey4.isNotBlank()) geminiKeys.add(settings.geminiApiKey4)
+        if (advanced.geminiApiKey2.isNotBlank() && !geminiKeys.contains(advanced.geminiApiKey2)) geminiKeys.add(advanced.geminiApiKey2)
+        if (advanced.geminiApiKey3.isNotBlank() && !geminiKeys.contains(advanced.geminiApiKey3)) geminiKeys.add(advanced.geminiApiKey3)
+        if (advanced.geminiApiKey4.isNotBlank() && !geminiKeys.contains(advanced.geminiApiKey4)) geminiKeys.add(advanced.geminiApiKey4)
+        if (advanced.geminiApiKey5.isNotBlank() && !geminiKeys.contains(advanced.geminiApiKey5)) geminiKeys.add(advanced.geminiApiKey5)
 
         var finalResult: AiResult? = null
         val startTime = System.currentTimeMillis()
@@ -125,10 +115,37 @@ class AiRepository(
             )
         } else {
             // Try Gemini with ultra-fast streaming first if callback provided
-            for (keyToTry in geminiKeys) {
-                val geminiResult = if (onChunk != null) {
+            finalResult = if (onChunk != null) {
+                geminiApiClient.generateContentStream(
+                    apiKeyOverrides = geminiKeys,
+                    model = settings.geminiModel,
+                    systemPrompt = sysPrompt,
+                    messages = messages,
+                    imageInlineBase64 = firstImageBase64,
+                    imagesInlineBase64 = compressedImagesBase64,
+                    isWebSearchEnabled = settings.isWebSearchEnabled,
+                    onChunk = onChunk
+                )
+            } else {
+                geminiApiClient.generateContent(
+                    apiKeyOverrides = geminiKeys,
+                    model = settings.geminiModel,
+                    systemPrompt = sysPrompt,
+                    messages = messages,
+                    imageInlineBase64 = firstImageBase64,
+                    imagesInlineBase64 = compressedImagesBase64,
+                    isWebSearchEnabled = settings.isWebSearchEnabled
+                )
+            }
+        }
+
+        // If primary failed and fallback is enabled, try alternative configured providers
+        if (finalResult !is AiResult.Success && settings.isFallbackEnabled) {
+            if (primaryProvider == "openai" || primaryProvider == "poe" || primaryProvider == "openrouter") {
+                // Fallback to Gemini with key rotation
+                val fallbackResult = if (onChunk != null) {
                     geminiApiClient.generateContentStream(
-                        apiKeyOverride = keyToTry.ifBlank { null },
+                        apiKeyOverrides = geminiKeys,
                         model = settings.geminiModel,
                         systemPrompt = sysPrompt,
                         messages = messages,
@@ -139,7 +156,7 @@ class AiRepository(
                     )
                 } else {
                     geminiApiClient.generateContent(
-                        apiKeyOverride = keyToTry.ifBlank { null },
+                        apiKeyOverrides = geminiKeys,
                         model = settings.geminiModel,
                         systemPrompt = sysPrompt,
                         messages = messages,
@@ -148,47 +165,8 @@ class AiRepository(
                         isWebSearchEnabled = settings.isWebSearchEnabled
                     )
                 }
-
-                if (geminiResult is AiResult.Success) {
-                    finalResult = geminiResult
-                    break
-                } else {
-                    finalResult = geminiResult
-                }
-            }
-        }
-
-        // If primary failed and fallback is enabled, try alternative configured providers
-        if (finalResult !is AiResult.Success && settings.isFallbackEnabled) {
-            if (primaryProvider == "openai" || primaryProvider == "poe" || primaryProvider == "openrouter") {
-                // Fallback to Gemini with key rotation
-                for (keyToTry in geminiKeys) {
-                    val fallbackResult = if (onChunk != null) {
-                        geminiApiClient.generateContentStream(
-                            apiKeyOverride = keyToTry.ifBlank { null },
-                            model = settings.geminiModel,
-                            systemPrompt = sysPrompt,
-                            messages = messages,
-                            imageInlineBase64 = firstImageBase64,
-                            imagesInlineBase64 = compressedImagesBase64,
-                            isWebSearchEnabled = settings.isWebSearchEnabled,
-                            onChunk = onChunk
-                        )
-                    } else {
-                        geminiApiClient.generateContent(
-                            apiKeyOverride = keyToTry.ifBlank { null },
-                            model = settings.geminiModel,
-                            systemPrompt = sysPrompt,
-                            messages = messages,
-                            imageInlineBase64 = firstImageBase64,
-                            imagesInlineBase64 = compressedImagesBase64,
-                            isWebSearchEnabled = settings.isWebSearchEnabled
-                        )
-                    }
-                    if (fallbackResult is AiResult.Success) {
-                        finalResult = fallbackResult
-                        break
-                    }
+                if (fallbackResult is AiResult.Success) {
+                    finalResult = fallbackResult
                 }
             } else {
                 // Only fallback to other providers if their API key is actually configured

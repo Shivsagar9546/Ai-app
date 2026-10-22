@@ -19,6 +19,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.ComposeView
@@ -156,6 +157,13 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     private var screenWidth = 1080
     private var screenHeight = 2400
 
+    // Saved Floating Window State (Persists size, position, and transparency across minimize / close / reopen)
+    private var savedPopupWidth: Int? = null
+    private var savedPopupHeight: Int? = null
+    private var savedPopupX: Int = 0
+    private var savedPopupY: Int = 0
+    private var savedPopupAlpha: Float = 1.0f
+
     override fun onCreate() {
         super.onCreate()
         try {
@@ -213,13 +221,14 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = android.app.NotificationChannel(
                 OmniAIApplication.CHANNEL_FLOATING_SERVICE,
-                "Floating Assistant Service",
-                android.app.NotificationManager.IMPORTANCE_LOW
+                "Floating Assistant (Silent)",
+                android.app.NotificationManager.IMPORTANCE_MIN
             ).apply {
-                description = "Silent internal channel for background overlay service"
+                description = "Silent background channel for floating assistant"
                 setShowBadge(false)
                 enableLights(false)
                 enableVibration(false)
+                setSound(null, null)
             }
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
             nm.createNotificationChannel(channel)
@@ -228,26 +237,6 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
 
     private fun startForegroundServiceNotification() {
         ensureNotificationChannel()
-        val openIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val stopIntent = Intent(this, FloatingAssistantService::class.java).apply {
-            action = ACTION_STOP_SERVICE
-        }
-        val stopPendingIntent = PendingIntent.getService(
-            this,
-            1,
-            stopIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
         val notification = createForegroundNotification()
 
         try {
@@ -267,50 +256,38 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         }
     }
 
+    private fun dismissNotificationCompletely() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            nm.cancel(NOTIFICATION_ID)
+            nm.cancelAll()
+        } catch (e: Exception) {}
+    }
+
     private fun createForegroundNotification(): Notification {
+        val openIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
         val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val stopPendingIntent = PendingIntent.getService(
-            this,
-            1,
-            Intent(this, FloatingAssistantService::class.java).apply { action = ACTION_STOP_SERVICE },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val cropPendingIntent = PendingIntent.getService(
-            this,
-            2,
-            Intent(this, FloatingAssistantService::class.java).apply { action = ACTION_CROP },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val instantPendingIntent = PendingIntent.getService(
-            this,
-            3,
-            Intent(this, FloatingAssistantService::class.java).apply { action = ACTION_INSTANT },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val chatPendingIntent = PendingIntent.getService(
-            this,
-            4,
-            Intent(this, FloatingAssistantService::class.java).apply { action = ACTION_CHAT },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            this, 0, openIntent,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
         )
 
         return NotificationCompat.Builder(this, OmniAIApplication.CHANNEL_FLOATING_SERVICE)
-            .setContentTitle("OmniAI Assistant Panel")
-            .setContentText("Direct access to active vision tools")
+            .setContentTitle("OmniAI Assistant")
+            .setContentText("Floating Assistant Active")
             .setSmallIcon(R.mipmap.ic_launcher)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setContentIntent(pendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setSilent(true)
             .setOngoing(true)
-            .addAction(0, "✂️ Crop", cropPendingIntent)
-            .addAction(0, "⚡ Text", instantPendingIntent)
-            .addAction(0, "💬 Chat", chatPendingIntent)
-            .addAction(0, "❌ Exit", stopPendingIntent)
+            .setSilent(true)
             .build()
     }
 
@@ -326,9 +303,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
-        } catch (e: Exception) {
-            android.util.Log.w("FloatingService", "Foreground notification update error", e)
-        }
+        } catch (e: Exception) {}
     }
 
     fun demoteFromMediaProjectionFgs() {
@@ -343,9 +318,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
-        } catch (e: Exception) {
-            android.util.Log.w("FloatingService", "Could not refresh FGS notification", e)
-        }
+        } catch (e: Exception) {}
     }
 
     private fun safelyRemoveView(viewToRemove: View?) {
@@ -570,6 +543,14 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         if (popupView != null) {
             try {
                 popupView?.visibility = View.VISIBLE
+                popupParams?.let { params ->
+                    savedPopupWidth?.let { params.width = it }
+                    savedPopupHeight?.let { params.height = it }
+                    params.x = savedPopupX
+                    params.y = savedPopupY
+                    params.alpha = savedPopupAlpha.coerceIn(0.25f, 1.0f)
+                    windowManager.updateViewLayout(popupView, params)
+                }
                 return
             } catch (e: Exception) {
                 hidePopup()
@@ -577,8 +558,8 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         }
 
         updateScreenDimensions()
-        val defaultWidth = (screenWidth * 0.92f).toInt().coerceIn(340, 1020)
-        val defaultHeight = (screenHeight * 0.65f).toInt().coerceIn(460, 1600)
+        val defaultWidth = savedPopupWidth ?: (screenWidth * 0.92f).toInt().coerceIn(340, 1020)
+        val defaultHeight = savedPopupHeight ?: (screenHeight * 0.65f).toInt().coerceIn(460, 1600)
 
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -595,8 +576,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.CENTER
-            x = 0
-            y = 0
+            x = savedPopupX
+            y = savedPopupY
+            alpha = savedPopupAlpha.coerceIn(0.25f, 1.0f)
             @Suppress("DEPRECATION")
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
@@ -607,10 +589,24 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             setViewTreeSavedStateRegistryOwner(this@FloatingAssistantService)
             setViewTreeViewModelStoreOwner(this@FloatingAssistantService)
             setContent {
+                val omniApp = application as OmniAIApplication
+                val adminSettings by omniApp.adminPreferences.settingsFlow.collectAsState(initial = AdminSettings())
                 val msgs by _messages.collectAsState()
                 val isGen by _isGenerating.collectAsState()
                 val status by _statusText.collectAsState()
                 val attachedImg by _attachedImage.collectAsState()
+
+                LaunchedEffect(adminSettings.bubbleAlpha) {
+                    if (savedPopupAlpha == 1.0f && adminSettings.bubbleAlpha < 1.0f) {
+                        savedPopupAlpha = adminSettings.bubbleAlpha
+                        popupParams?.let { params ->
+                            params.alpha = savedPopupAlpha
+                            try {
+                                windowManager.updateViewLayout(popupView, params)
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
 
                 OmniAITheme {
                     FloatingPopUpView(
@@ -676,6 +672,8 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                             popupParams?.let { params ->
                                 params.x += dx.toInt()
                                 params.y += dy.toInt()
+                                savedPopupX = params.x
+                                savedPopupY = params.y
                                 try {
                                     windowManager.updateViewLayout(popupView, popupParams)
                                 } catch (e: Exception) {}
@@ -698,19 +696,30 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                                 params.x = proposedX.coerceIn(-maxDisplacementX, maxDisplacementX)
                                 params.y = proposedY.coerceIn(-maxDisplacementY, maxDisplacementY)
                                 
+                                savedPopupWidth = newW
+                                savedPopupHeight = newH
+                                savedPopupX = params.x
+                                savedPopupY = params.y
+                                
                                 try {
                                     windowManager.updateViewLayout(popupView, popupParams)
                                 } catch (e: Exception) {}
                             }
                         },
                         onAlphaChanged = { newAlpha ->
+                            val cleanAlpha = newAlpha.coerceIn(0.25f, 1.0f)
+                            savedPopupAlpha = cleanAlpha
+                            serviceScope.launch {
+                                omniApp.adminPreferences.updateSettings(bubbleAlpha = cleanAlpha)
+                            }
                             popupParams?.let { params ->
-                                params.alpha = newAlpha.coerceIn(0.25f, 1.0f)
+                                params.alpha = cleanAlpha
                                 try {
                                     windowManager.updateViewLayout(popupView, params)
                                 } catch (e: Exception) {}
                             }
-                        }
+                        },
+                        initialAlpha = savedPopupAlpha
                     )
                 }
             }
@@ -1365,14 +1374,13 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                                 val newH = if (bitmap.width > bitmap.height) (maxDim / ratio).toInt() else maxDim
                                 scaled = Bitmap.createScaledBitmap(bitmap, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
                             }
-                            val cacheFile = java.io.File(app.cacheDir, "img_${java.util.UUID.randomUUID()}.jpg")
-                            java.io.FileOutputStream(cacheFile).use { fos ->
-                                scaled.compress(Bitmap.CompressFormat.JPEG, 75, fos)
-                            }
+                            val outputStream = java.io.ByteArrayOutputStream()
+                            scaled.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
+                            val bytes = outputStream.toByteArray()
                             if (scaled != bitmap) {
                                 scaled.recycle()
                             }
-                            cacheFile.absolutePath
+                            android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
                         } catch (e: Exception) {
                             null
                         }
@@ -1580,6 +1588,10 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
             lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
             lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+        } catch (e: Exception) {}
+
+        try {
+            dismissNotificationCompletely()
         } catch (e: Exception) {}
 
         try {

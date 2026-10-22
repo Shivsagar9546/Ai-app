@@ -187,7 +187,8 @@ class GeminiApiClient {
     }
 
     suspend fun generateContentStream(
-        apiKeyOverride: String?,
+        apiKeyOverride: String? = null,
+        apiKeyOverrides: List<String> = emptyList(),
         model: String,
         systemPrompt: String,
         messages: List<AiMessage>,
@@ -196,17 +197,19 @@ class GeminiApiClient {
         isWebSearchEnabled: Boolean = false,
         onChunk: (String) -> Unit
     ): AiResult = withContext(Dispatchers.IO) {
-        val key = if (!apiKeyOverride.isNullOrBlank()) {
-            apiKeyOverride
-        } else {
-            try {
-                BuildConfig.GEMINI_API_KEY
-            } catch (e: Exception) {
-                ""
-            }
+        val keysToTry = mutableListOf<String>()
+        if (apiKeyOverrides.isNotEmpty()) {
+            keysToTry.addAll(apiKeyOverrides.map { it.trim() }.filter { it.isNotBlank() })
+        } else if (!apiKeyOverride.isNullOrBlank()) {
+            keysToTry.add(apiKeyOverride.trim())
         }
 
-        if (key.isBlank() || key == "MY_GEMINI_API_KEY") {
+        val buildConfigKey = try { BuildConfig.GEMINI_API_KEY } catch (_: Exception) { "" }
+        if (buildConfigKey.isNotBlank() && buildConfigKey != "MY_GEMINI_API_KEY" && !keysToTry.contains(buildConfigKey)) {
+            keysToTry.add(buildConfigKey)
+        }
+
+        if (keysToTry.isEmpty()) {
             return@withContext AiResult.Error(
                 "Gemini API key is not configured. Please configure it in the Admin Panel or through AI Studio Secrets.",
                 isQuotaOrKeyError = true
@@ -231,93 +234,84 @@ class GeminiApiClient {
         var isQuotaOrKey = false
 
         for (targetModel in modelsToTry) {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:streamGenerateContent?alt=sse&key=$key"
-            try {
-                val rootJson = buildPayloadJson(systemPrompt, messages, allImages, isWebSearchEnabled)
-                val requestBody = rootJson.toString().toRequestBody(jsonMediaType)
-                val request = Request.Builder()
-                    .url(url)
-                    .post(requestBody)
-                    .build()
+            for (key in keysToTry) {
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:streamGenerateContent?alt=sse&key=$key"
+                try {
+                    val rootJson = buildPayloadJson(systemPrompt, messages, allImages, isWebSearchEnabled)
+                    val requestBody = rootJson.toString().toRequestBody(jsonMediaType)
+                    val request = Request.Builder()
+                        .url(url)
+                        .post(requestBody)
+                        .build()
 
-                val fullTextBuilder = StringBuilder()
-                var hasReceivedAnyChunk = false
+                    val fullTextBuilder = StringBuilder()
+                    var hasReceivedAnyChunk = false
 
-                val response = client.newCall(request).execute()
-                val responseCode = response.code
+                    val response = client.newCall(request).execute()
+                    val responseCode = response.code
 
-                if (responseCode !in 200..299) {
-                    val errorString = response.body?.string() ?: ""
-                    val errorMsg = try {
-                        val errorJson = JSONObject(errorString)
-                        errorJson.optJSONObject("error")?.optString("message") ?: "HTTP $responseCode: $errorString"
-                    } catch (e: Exception) {
-                        "HTTP $responseCode: $errorString"
-                    }
-                    response.close()
-                    lastErrorMsg = errorMsg
-                    val isKeyError = responseCode == 401 || responseCode == 403
-                    val isQuotaError = responseCode == 429
-                    isQuotaOrKey = isKeyError || isQuotaError
+                    if (responseCode !in 200..299) {
+                        val errorString = response.body?.string() ?: ""
+                        val errorMsg = try {
+                            val errorJson = JSONObject(errorString)
+                            errorJson.optJSONObject("error")?.optString("message") ?: "HTTP $responseCode: $errorString"
+                        } catch (e: Exception) {
+                            "HTTP $responseCode: $errorString"
+                        }
+                        response.close()
+                        lastErrorMsg = errorMsg
+                        val isKeyError = responseCode == 401 || responseCode == 403
+                        val isQuotaError = responseCode == 429
+                        isQuotaOrKey = isKeyError || isQuotaError
 
-                    Log.w("GeminiApiClient", "Model $targetModel failed ($responseCode: $errorMsg). Auto-falling back to next model...")
-                    if (targetModel != modelsToTry.last()) {
+                        Log.w("GeminiApiClient", "Key (${maskKeyForLog(key)}) with model $targetModel failed ($responseCode: $errorMsg). Trying next key or model...")
                         continue
                     }
-                    return@withContext AiResult.Error(errorMsg, isQuotaOrKeyError = isQuotaOrKey)
-                }
 
-                response.body?.byteStream()?.bufferedReader()?.use { reader ->
-                    var line: String?
-                    while (reader.readLine().also { line = it } != null) {
-                        val trimmed = line?.trim() ?: continue
-                        if (!trimmed.startsWith("data:")) continue
-                        val jsonPayload = trimmed.removePrefix("data:").trim()
-                        if (jsonPayload.isEmpty() || jsonPayload == "[DONE]") continue
+                    response.body?.byteStream()?.bufferedReader()?.use { reader ->
+                        var line: String?
+                        while (reader.readLine().also { line = it } != null) {
+                            val trimmed = line?.trim() ?: continue
+                            if (!trimmed.startsWith("data:")) continue
+                            val jsonPayload = trimmed.removePrefix("data:").trim()
+                            if (jsonPayload.isEmpty() || jsonPayload == "[DONE]") continue
 
-                        try {
-                            val chunkObj = JSONObject(jsonPayload)
-                            val candidates = chunkObj.optJSONArray("candidates")
-                            if (candidates != null && candidates.length() > 0) {
-                                val firstCandidate = candidates.getJSONObject(0)
-                                val content = firstCandidate.optJSONObject("content")
-                                val parts = content?.optJSONArray("parts")
-                                if (parts != null) {
-                                    for (i in 0 until parts.length()) {
-                                        val part = parts.getJSONObject(i)
-                                        val chunkText = part.optString("text", "")
-                                        if (chunkText.isNotEmpty()) {
-                                            fullTextBuilder.append(chunkText)
-                                            hasReceivedAnyChunk = true
-                                            withContext(Dispatchers.Main) {
-                                                onChunk(chunkText)
+                            try {
+                                val chunkObj = JSONObject(jsonPayload)
+                                val candidates = chunkObj.optJSONArray("candidates")
+                                if (candidates != null && candidates.length() > 0) {
+                                    val firstCandidate = candidates.getJSONObject(0)
+                                    val content = firstCandidate.optJSONObject("content")
+                                    val parts = content?.optJSONArray("parts")
+                                    if (parts != null) {
+                                        for (i in 0 until parts.length()) {
+                                            val part = parts.getJSONObject(i)
+                                            val chunkText = part.optString("text", "")
+                                            if (chunkText.isNotEmpty()) {
+                                                fullTextBuilder.append(chunkText)
+                                                hasReceivedAnyChunk = true
+                                                withContext(Dispatchers.Main) {
+                                                    onChunk(chunkText)
+                                                }
                                             }
                                         }
                                     }
                                 }
-                            }
-                        } catch (_: Exception) {}
+                            } catch (_: Exception) {}
+                        }
                     }
-                }
 
-                val finalOutput = fullTextBuilder.toString()
-                if (finalOutput.isNotBlank() || hasReceivedAnyChunk) {
-                    return@withContext AiResult.Success(
-                        text = finalOutput,
-                        providerUsed = "Gemini",
-                        modelUsed = targetModel
-                    )
-                }
-
-                if (targetModel != modelsToTry.last()) {
-                    continue
-                }
-                return@withContext AiResult.Error("No response generated from Gemini stream.")
-            } catch (e: Exception) {
-                Log.e("GeminiApiClient", "Streaming error on $targetModel", e)
-                lastErrorMsg = "Network error: ${e.localizedMessage ?: e.message}"
-                if (targetModel != modelsToTry.last()) {
-                    continue
+                    val finalOutput = fullTextBuilder.toString()
+                    if (finalOutput.isNotBlank() || hasReceivedAnyChunk) {
+                        return@withContext AiResult.Success(
+                            text = finalOutput,
+                            providerUsed = "Gemini",
+                            modelUsed = targetModel
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e("GeminiApiClient", "Streaming error on $targetModel with key ${maskKeyForLog(key)}", e)
+                    lastErrorMsg = "Network error: ${e.localizedMessage ?: e.message}"
                 }
             }
         }
@@ -326,7 +320,8 @@ class GeminiApiClient {
     }
 
     suspend fun generateContent(
-        apiKeyOverride: String?,
+        apiKeyOverride: String? = null,
+        apiKeyOverrides: List<String> = emptyList(),
         model: String,
         systemPrompt: String,
         messages: List<AiMessage>,
@@ -334,17 +329,19 @@ class GeminiApiClient {
         imagesInlineBase64: List<String> = emptyList(),
         isWebSearchEnabled: Boolean = false
     ): AiResult = withContext(Dispatchers.IO) {
-        val key = if (!apiKeyOverride.isNullOrBlank()) {
-            apiKeyOverride
-        } else {
-            try {
-                BuildConfig.GEMINI_API_KEY
-            } catch (e: Exception) {
-                ""
-            }
+        val keysToTry = mutableListOf<String>()
+        if (apiKeyOverrides.isNotEmpty()) {
+            keysToTry.addAll(apiKeyOverrides.map { it.trim() }.filter { it.isNotBlank() })
+        } else if (!apiKeyOverride.isNullOrBlank()) {
+            keysToTry.add(apiKeyOverride.trim())
         }
 
-        if (key.isBlank() || key == "MY_GEMINI_API_KEY") {
+        val buildConfigKey = try { BuildConfig.GEMINI_API_KEY } catch (_: Exception) { "" }
+        if (buildConfigKey.isNotBlank() && buildConfigKey != "MY_GEMINI_API_KEY" && !keysToTry.contains(buildConfigKey)) {
+            keysToTry.add(buildConfigKey)
+        }
+
+        if (keysToTry.isEmpty()) {
             return@withContext AiResult.Error(
                 "Gemini API key is not configured. Please configure it in the Admin Panel or through AI Studio Secrets.",
                 isQuotaOrKeyError = true
@@ -369,104 +366,96 @@ class GeminiApiClient {
         var isQuotaOrKey = false
 
         for (targetModel in modelsToTry) {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:generateContent?key=$key"
-            try {
-                val rootJson = buildPayloadJson(systemPrompt, messages, allImages, isWebSearchEnabled)
-                val requestBody = rootJson.toString().toRequestBody(jsonMediaType)
-                val request = Request.Builder()
-                    .url(url)
-                    .post(requestBody)
-                    .build()
+            for (key in keysToTry) {
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:generateContent?key=$key"
+                try {
+                    val rootJson = buildPayloadJson(systemPrompt, messages, allImages, isWebSearchEnabled)
+                    val requestBody = rootJson.toString().toRequestBody(jsonMediaType)
+                    val request = Request.Builder()
+                        .url(url)
+                        .post(requestBody)
+                        .build()
 
-                val (responseCode, responseString) = client.newCall(request).execute().use { resp ->
-                    Pair(resp.code, resp.body?.string() ?: "")
-                }
-
-                if (responseCode !in 200..299) {
-                    val errorMsg = try {
-                        val errorJson = JSONObject(responseString)
-                        errorJson.optJSONObject("error")?.optString("message") ?: "HTTP $responseCode: $responseString"
-                    } catch (e: Exception) {
-                        "HTTP $responseCode: $responseString"
+                    val (responseCode, responseString) = client.newCall(request).execute().use { resp ->
+                        Pair(resp.code, resp.body?.string() ?: "")
                     }
-                    lastErrorMsg = errorMsg
-                    
-                    val isKeyError = responseCode == 401 || responseCode == 403
-                    val isQuotaError = responseCode == 429
-                    isQuotaOrKey = isKeyError || isQuotaError
 
-                    Log.w("GeminiApiClient", "Model $targetModel failed ($responseCode: $errorMsg). Auto-falling back to next model...")
-                    if (targetModel != modelsToTry.last()) {
+                    if (responseCode !in 200..299) {
+                        val errorMsg = try {
+                            val errorJson = JSONObject(responseString)
+                            errorJson.optJSONObject("error")?.optString("message") ?: "HTTP $responseCode: $responseString"
+                        } catch (e: Exception) {
+                            "HTTP $responseCode: $responseString"
+                        }
+                        lastErrorMsg = errorMsg
+                        
+                        val isKeyError = responseCode == 401 || responseCode == 403
+                        val isQuotaError = responseCode == 429
+                        isQuotaOrKey = isKeyError || isQuotaError
+
+                        Log.w("GeminiApiClient", "Key (${maskKeyForLog(key)}) with model $targetModel failed ($responseCode: $errorMsg). Trying next key or model...")
                         continue
                     }
 
-                    return@withContext AiResult.Error(
-                        errorMsg,
-                        isQuotaOrKeyError = isQuotaOrKey
-                    )
-                }
-
-                val respJson = JSONObject(responseString)
-                val candidates = respJson.optJSONArray("candidates")
-                if (candidates != null && candidates.length() > 0) {
-                    val firstCandidate = candidates.getJSONObject(0)
-                    val content = firstCandidate.optJSONObject("content")
-                    val parts = content?.optJSONArray("parts")
-                    val textBuilder = StringBuilder()
-                    if (parts != null) {
-                        for (i in 0 until parts.length()) {
-                            val part = parts.getJSONObject(i)
-                            textBuilder.append(part.optString("text", ""))
-                        }
-                    }
-                    var text = textBuilder.toString()
-                    if (text.isNotBlank()) {
-                        val groundingMetadata = firstCandidate.optJSONObject("groundingMetadata")
-                        if (groundingMetadata != null) {
-                            val groundingChunks = groundingMetadata.optJSONArray("groundingChunks")
-                            if (groundingChunks != null && groundingChunks.length() > 0) {
-                                val sourcesList = mutableListOf<String>()
-                                for (j in 0 until groundingChunks.length()) {
-                                    val chunk = groundingChunks.getJSONObject(j)
-                                    val web = chunk.optJSONObject("web")
-                                    if (web != null) {
-                                        val title = web.optString("title", "")
-                                        val uri = web.optString("uri", "")
-                                        if (uri.isNotBlank()) {
-                                            val displayTitle = if (title.isNotBlank()) title else uri
-                                            sourcesList.add("- [$displayTitle]($uri)")
-                                        }
-                                    }
-                                }
-                                if (sourcesList.isNotEmpty()) {
-                                    val distinctSources = sourcesList.distinct().take(5)
-                                    text += "\n\n🌐 **Web Search Sources:**\n" + distinctSources.joinToString("\n")
-                                }
+                    val respJson = JSONObject(responseString)
+                    val candidates = respJson.optJSONArray("candidates")
+                    if (candidates != null && candidates.length() > 0) {
+                        val firstCandidate = candidates.getJSONObject(0)
+                        val content = firstCandidate.optJSONObject("content")
+                        val parts = content?.optJSONArray("parts")
+                        val textBuilder = StringBuilder()
+                        if (parts != null) {
+                            for (i in 0 until parts.length()) {
+                                val part = parts.getJSONObject(i)
+                                textBuilder.append(part.optString("text", ""))
                             }
                         }
+                        var text = textBuilder.toString()
+                        if (text.isNotBlank()) {
+                            val groundingMetadata = firstCandidate.optJSONObject("groundingMetadata")
+                            if (groundingMetadata != null) {
+                                val groundingChunks = groundingMetadata.optJSONArray("groundingChunks")
+                                if (groundingChunks != null && groundingChunks.length() > 0) {
+                                    val sourcesList = mutableListOf<String>()
+                                    for (j in 0 until groundingChunks.length()) {
+                                        val chunk = groundingChunks.getJSONObject(j)
+                                        val web = chunk.optJSONObject("web")
+                                        if (web != null) {
+                                            val title = web.optString("title", "")
+                                            val uri = web.optString("uri", "")
+                                            if (uri.isNotBlank()) {
+                                                val displayTitle = if (title.isNotBlank()) title else uri
+                                                sourcesList.add("- [$displayTitle]($uri)")
+                                            }
+                                        }
+                                    }
+                                    if (sourcesList.isNotEmpty()) {
+                                        val distinctSources = sourcesList.distinct().take(5)
+                                        text += "\n\n🌐 **Web Search Sources:**\n" + distinctSources.joinToString("\n")
+                                    }
+                                }
+                            }
 
-                        return@withContext AiResult.Success(
-                            text = text,
-                            providerUsed = "Gemini",
-                            modelUsed = targetModel
-                        )
+                            return@withContext AiResult.Success(
+                                text = text,
+                                providerUsed = "Gemini",
+                                modelUsed = targetModel
+                            )
+                        }
                     }
-                }
-
-                if (targetModel != modelsToTry.last()) {
-                    continue
-                }
-                return@withContext AiResult.Error("No response generated from Gemini.")
-            } catch (e: Exception) {
-                Log.e("GeminiApiClient", "Generation error on $targetModel", e)
-                lastErrorMsg = "Network error connecting to Gemini: ${e.localizedMessage ?: e.message}"
-                if (targetModel != modelsToTry.last()) {
-                    continue
+                } catch (e: Exception) {
+                    Log.e("GeminiApiClient", "Content error on $targetModel with key ${maskKeyForLog(key)}", e)
+                    lastErrorMsg = "Network error: ${e.localizedMessage ?: e.message}"
                 }
             }
         }
 
         return@withContext AiResult.Error(lastErrorMsg, isQuotaOrKeyError = isQuotaOrKey)
+    }
+
+    private fun maskKeyForLog(key: String): String {
+        if (key.length <= 8) return "••••"
+        return "${key.take(4)}...${key.takeLast(4)}"
     }
 
     private fun autoSelectModel(userPrompt: String, hasImages: Boolean = false): String {

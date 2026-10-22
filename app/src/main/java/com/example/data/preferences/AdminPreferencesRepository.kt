@@ -21,6 +21,9 @@ val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "ad
 data class AdminSettings(
     val defaultProvider: String = "gemini", // "gemini", "openai", "poe", or "openrouter"
     val geminiApiKey: String = "",
+    val geminiApiKey2: String = "",
+    val geminiApiKey3: String = "",
+    val geminiApiKey4: String = "",
     val geminiModel: String = "auto",
     val isGeminiEnabled: Boolean = true,
     val openAiApiKey: String = "",
@@ -60,6 +63,12 @@ data class AdminSettings(
     val bubbleSize: String = "medium", // "small", "medium", "large"
     val bubbleAlpha: Float = 1.0f
 ) {
+    fun getActiveGeminiApiKeys(): List<String> {
+        return listOf(geminiApiKey, geminiApiKey2, geminiApiKey3, geminiApiKey4)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+    }
+
     fun maskKey(key: String): String {
         if (key.isBlank()) return "Not configured"
         if (key.length <= 8) return "••••••••"
@@ -115,6 +124,9 @@ class AdminPreferencesRepository(val context: Context) {
     private object PreferencesKeys {
         val DEFAULT_PROVIDER = stringPreferencesKey("default_provider")
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
+        val GEMINI_API_KEY_2 = stringPreferencesKey("gemini_api_key_2")
+        val GEMINI_API_KEY_3 = stringPreferencesKey("gemini_api_key_3")
+        val GEMINI_API_KEY_4 = stringPreferencesKey("gemini_api_key_4")
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")
         val GEMINI_ENABLED = booleanPreferencesKey("gemini_enabled")
         val OPENAI_API_KEY = stringPreferencesKey("openai_api_key")
@@ -169,6 +181,9 @@ class AdminPreferencesRepository(val context: Context) {
         AdminSettings(
             defaultProvider = preferences[PreferencesKeys.DEFAULT_PROVIDER] ?: "gemini",
             geminiApiKey = preferences[PreferencesKeys.GEMINI_API_KEY] ?: "",
+            geminiApiKey2 = preferences[PreferencesKeys.GEMINI_API_KEY_2] ?: "",
+            geminiApiKey3 = preferences[PreferencesKeys.GEMINI_API_KEY_3] ?: "",
+            geminiApiKey4 = preferences[PreferencesKeys.GEMINI_API_KEY_4] ?: "",
             geminiModel = preferences[PreferencesKeys.GEMINI_MODEL]?.let { stored ->
                 if (stored.isBlank() || com.example.data.ai.GeminiModelRegistry.isDeprecated(stored)) {
                     "auto"
@@ -227,6 +242,9 @@ class AdminPreferencesRepository(val context: Context) {
     suspend fun updateSettings(
         defaultProvider: String? = null,
         geminiApiKey: String? = null,
+        geminiApiKey2: String? = null,
+        geminiApiKey3: String? = null,
+        geminiApiKey4: String? = null,
         geminiModel: String? = null,
         isGeminiEnabled: Boolean? = null,
         openAiApiKey: String? = null,
@@ -260,6 +278,9 @@ class AdminPreferencesRepository(val context: Context) {
         context.dataStore.edit { preferences ->
             defaultProvider?.let { preferences[PreferencesKeys.DEFAULT_PROVIDER] = it }
             geminiApiKey?.let { preferences[PreferencesKeys.GEMINI_API_KEY] = it }
+            geminiApiKey2?.let { preferences[PreferencesKeys.GEMINI_API_KEY_2] = it }
+            geminiApiKey3?.let { preferences[PreferencesKeys.GEMINI_API_KEY_3] = it }
+            geminiApiKey4?.let { preferences[PreferencesKeys.GEMINI_API_KEY_4] = it }
             geminiModel?.let {
                 val clean = if (it.isBlank() || com.example.data.ai.GeminiModelRegistry.isDeprecated(it)) "auto" else it.trim()
                 preferences[PreferencesKeys.GEMINI_MODEL] = clean

@@ -142,14 +142,6 @@ fun ScreenAssistantHubScreen(
         }
     }
 
-
-
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { _ ->
-        startFloatingService(context)
-    }
-
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -260,13 +252,7 @@ fun ScreenAssistantHubScreen(
                                         Toast.makeText(context, "Please grant 'Display over other apps' permission first", Toast.LENGTH_LONG).show()
                                         requestOverlayPermission(context)
                                     } else {
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                                            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-                                        ) {
-                                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                        } else {
-                                            startFloatingService(context)
-                                        }
+                                        startFloatingService(context)
                                     }
                                 } else {
                                     try {
@@ -408,6 +394,17 @@ fun ScreenAssistantHubScreen(
                                     else -> listOf(AiBubbleGradientStart, AiBubbleGradientEnd)
                                 }
 
+                                val previewLetter = remember(adminSettings.bubblePresetIcon) {
+                                    val lower = adminSettings.bubblePresetIcon.lowercase()
+                                    if (lower.startsWith("letter_")) {
+                                        lower.removePrefix("letter_").uppercase()
+                                    } else if (lower.length == 1 && lower[0].isLetter()) {
+                                        lower.uppercase()
+                                    } else {
+                                        null
+                                    }
+                                }
+
                                 val iconVec = when (adminSettings.bubblePresetIcon.lowercase()) {
                                     "robot" -> Icons.Default.SmartToy
                                     "brain" -> Icons.Default.Psychology
@@ -442,6 +439,8 @@ fun ScreenAssistantHubScreen(
                                                         .fillMaxSize()
                                                         .clip(CircleShape)
                                                 )
+                                            } else if (previewLetter != null) {
+                                                Text(text = previewLetter, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
                                             } else {
                                                 Icon(imageVector = iconVec, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
                                             }
@@ -467,6 +466,8 @@ fun ScreenAssistantHubScreen(
                                                         .fillMaxSize()
                                                         .clip(sqShape)
                                                 )
+                                            } else if (previewLetter != null) {
+                                                Text(text = previewLetter, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
                                             } else {
                                                 Icon(imageVector = iconVec, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
                                             }
@@ -497,6 +498,8 @@ fun ScreenAssistantHubScreen(
                                                             .clip(CircleShape)
                                                             .border(1.dp, Color.White, CircleShape)
                                                     )
+                                                } else if (previewLetter != null) {
+                                                    Text(text = previewLetter, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
                                                 } else {
                                                     Icon(imageVector = iconVec, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                                                 }
@@ -580,6 +583,14 @@ fun ScreenAssistantHubScreen(
                             Pair("robot", "🤖 Robot"),
                             Pair("brain", "🧠 Brain"),
                             Pair("flash", "⚡ Flash"),
+                            Pair("letter_s", "🅂 S"),
+                            Pair("letter_k", "🄺 K"),
+                            Pair("letter_i", "🄸 I"),
+                            Pair("letter_a", "🄰 A"),
+                            Pair("letter_m", "🄼 M"),
+                            Pair("letter_o", "🄾 O"),
+                            Pair("letter_r", "🅁 R"),
+                            Pair("letter_j", "🄹 J"),
                             Pair("target", "🎯 Focus"),
                             Pair("flame", "🔥 Fire"),
                             Pair("diamond", "💎 Gem"),
@@ -707,24 +718,30 @@ fun ScreenAssistantHubScreen(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
+                        FilterChip(
+                            selected = adminSettings.bubbleSize == "xs" || adminSettings.bubbleSize == "micro" || adminSettings.bubbleSize == "tiny",
+                            onClick = { viewModel.updateAdminSettings(bubbleSize = "xs") },
+                            label = { Text("Micro (XS)", fontSize = 10.5.sp) },
+                            modifier = Modifier.weight(1f)
+                        )
                         FilterChip(
                             selected = adminSettings.bubbleSize == "small",
                             onClick = { viewModel.updateAdminSettings(bubbleSize = "small") },
-                            label = { Text("Small") },
+                            label = { Text("Small", fontSize = 10.5.sp) },
                             modifier = Modifier.weight(1f)
                         )
                         FilterChip(
                             selected = adminSettings.bubbleSize == "medium",
                             onClick = { viewModel.updateAdminSettings(bubbleSize = "medium") },
-                            label = { Text("Medium") },
+                            label = { Text("Medium", fontSize = 10.5.sp) },
                             modifier = Modifier.weight(1f)
                         )
                         FilterChip(
                             selected = adminSettings.bubbleSize == "large",
                             onClick = { viewModel.updateAdminSettings(bubbleSize = "large") },
-                            label = { Text("Large") },
+                            label = { Text("Large", fontSize = 10.5.sp) },
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -795,13 +812,7 @@ fun ScreenAssistantHubScreen(
                         Toast.makeText(context, "Please grant 'Display over other apps' permission first", Toast.LENGTH_LONG).show()
                         requestOverlayPermission(context)
                     } else {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-                        ) {
-                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        } else {
-                            startFloatingService(context)
-                        }
+                        startFloatingService(context)
                     }
                 },
                 shape = RoundedCornerShape(16.dp),
@@ -833,7 +844,15 @@ private fun startFloatingService(context: Context) {
         }
         Toast.makeText(context, "Floating Assistant Bubble started!", Toast.LENGTH_SHORT).show()
     } catch (e: Exception) {
-        Toast.makeText(context, "Failed to start service: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+        try {
+            val intent = Intent(context, FloatingAssistantService::class.java).apply {
+                action = FloatingAssistantService.ACTION_SHOW_BUBBLE
+            }
+            context.startService(intent)
+            Toast.makeText(context, "Floating Assistant Bubble started!", Toast.LENGTH_SHORT).show()
+        } catch (ex: Exception) {
+            Toast.makeText(context, "Failed to start service: ${ex.localizedMessage}", Toast.LENGTH_LONG).show()
+        }
     }
 }
 

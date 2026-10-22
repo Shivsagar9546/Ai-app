@@ -64,24 +64,26 @@ class OmniAIApplication : Application() {
 
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_FLOATING_SERVICE,
-                "Floating Assistant Service",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Silent internal channel for background overlay service"
-                setShowBadge(false)
-                enableLights(false)
-                enableVibration(false)
-            }
-
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.createNotificationChannel(channel)
+            try {
+                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                val channel = NotificationChannel(
+                    CHANNEL_FLOATING_SERVICE,
+                    "Floating Assistant (Silent)",
+                    NotificationManager.IMPORTANCE_MIN
+                ).apply {
+                    description = "Silent background channel for floating assistant"
+                    setShowBadge(false)
+                    enableLights(false)
+                    enableVibration(false)
+                    setSound(null, null)
+                }
+                notificationManager.createNotificationChannel(channel)
+            } catch (e: Exception) {}
         }
     }
 
     companion object {
-        const val CHANNEL_FLOATING_SERVICE = "channel_floating_ai_service"
+        const val CHANNEL_FLOATING_SERVICE = "channel_floating_ai_service_min"
         lateinit var instance: OmniAIApplication
             private set
     }

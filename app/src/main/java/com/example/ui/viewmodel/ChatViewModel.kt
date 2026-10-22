@@ -297,14 +297,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                 val newH = if (bmp.width > bmp.height) (maxDim / ratio).toInt() else maxDim
                                 scaled = Bitmap.createScaledBitmap(bmp, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
                             }
-                            val cacheFile = java.io.File(getApplication<Application>().cacheDir, "img_${java.util.UUID.randomUUID()}.jpg")
-                            java.io.FileOutputStream(cacheFile).use { fos ->
-                                scaled.compress(Bitmap.CompressFormat.JPEG, 70, fos)
-                            }
+                            val outputStream = java.io.ByteArrayOutputStream()
+                            scaled.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
+                            val bytes = outputStream.toByteArray()
                             if (scaled != bmp) {
                                 scaled.recycle()
                             }
-                            cacheFile.absolutePath
+                            android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
                         } catch (e: Exception) {
                             null
                         }
@@ -500,6 +499,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun updateAdminSettings(
         defaultProvider: String? = null,
         geminiApiKey: String? = null,
+        geminiApiKey2: String? = null,
+        geminiApiKey3: String? = null,
+        geminiApiKey4: String? = null,
         geminiModel: String? = null,
         isGeminiEnabled: Boolean? = null,
         openAiApiKey: String? = null,
@@ -534,6 +536,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             adminPrefs.updateSettings(
                 defaultProvider = defaultProvider,
                 geminiApiKey = geminiApiKey,
+                geminiApiKey2 = geminiApiKey2,
+                geminiApiKey3 = geminiApiKey3,
+                geminiApiKey4 = geminiApiKey4,
                 geminiModel = geminiModel,
                 isGeminiEnabled = isGeminiEnabled,
                 openAiApiKey = openAiApiKey,
