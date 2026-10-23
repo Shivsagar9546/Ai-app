@@ -113,18 +113,19 @@ class FloatingImagePickerActivity : ComponentActivity() {
             return
         }
         try {
-            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            if (bytes == null || bytes.isEmpty()) {
-                Toast.makeText(this, "Could not read image data", Toast.LENGTH_SHORT).show()
+            val boundsOptions = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, boundsOptions)
+            }
+
+            if (boundsOptions.outWidth <= 0 || boundsOptions.outHeight <= 0) {
+                Toast.makeText(this, "Could not load image dimensions", Toast.LENGTH_SHORT).show()
                 FloatingAssistantService.activeServiceInstance?.showPopup()
                 safeFinish()
                 return
             }
-
-            val boundsOptions = BitmapFactory.Options().apply {
-                inJustDecodeBounds = true
-            }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, boundsOptions)
 
             var sampleSize = 1
             val maxDim = 1280
@@ -143,7 +144,9 @@ class FloatingImagePickerActivity : ComponentActivity() {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
 
-            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
+            val bitmap = contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, decodeOptions)
+            }
 
             if (bitmap != null) {
                 val scaled = scaleDownBitmap(bitmap, 1280)

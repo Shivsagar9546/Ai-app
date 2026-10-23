@@ -60,7 +60,7 @@
             android:exported="false"
             android:theme="@style/Theme.Transparent"
             android:taskAffinity="com.example.floating.helper"
-            android:launchMode="singleInstance"
+            android:launchMode="singleTop"
             android:excludeFromRecents="true" />
 
         <!-- Floating Assistant Window Manager Service -->

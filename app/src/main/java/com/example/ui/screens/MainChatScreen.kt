@@ -680,6 +680,10 @@ fun MainChatScreen(
                             value = inputText,
                             onValueChange = { inputText = it },
                             placeholder = "Message...",
+                            onBitmapReceived = { bmp ->
+                                viewModel.addAttachedBitmaps(listOf(bmp))
+                                Toast.makeText(context, "Pasted image from keyboard/clipboard", Toast.LENGTH_SHORT).show()
+                            },
                             onImageReceived = { clipData ->
                                 viewModel.attachClipData(clipData)
                             },

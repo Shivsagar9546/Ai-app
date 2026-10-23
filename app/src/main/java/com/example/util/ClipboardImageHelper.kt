@@ -150,32 +150,67 @@ object ClipboardImageHelper {
         for (i in 0 until clipData.itemCount) {
             val item = clipData.getItemAt(i) ?: continue
 
-            // 1. Check URI
+            // 1. Check direct URI
             val uri = item.uri
             if (uri != null) {
                 decodeSampledBitmapFromUri(context, uri, maxDim, maxDim)?.let { bmp ->
+                    bitmaps.add(bmp)
+                    continue
+                }
+            }
+
+            // 2. Check Intent extra if present
+            item.intent?.data?.let { dataUri ->
+                decodeSampledBitmapFromUri(context, dataUri, maxDim, maxDim)?.let { bmp ->
                     bitmaps.add(bmp)
                     return@let
                 }
             }
 
-            // 2. Check Intent extra if present
-            item.intent?.let { intent ->
-                val dataUri = intent.data
-                if (dataUri != null) {
-                    decodeSampledBitmapFromUri(context, dataUri, maxDim, maxDim)?.let { bmp ->
-                        bitmaps.add(bmp)
+            // 3. Check HTML text (Samsung Keyboard clipboard sends <img> tags)
+            val html = item.htmlText ?: ""
+            if (html.contains("<img", ignoreCase = true) && html.contains("src=", ignoreCase = true)) {
+                val src = html.substringAfter("src=\"", "").substringBefore("\"", "")
+                    .ifBlank { html.substringAfter("src=\'", "").substringBefore("\'", "") }
+                if (src.isNotBlank()) {
+                    if (src.startsWith("data:image", ignoreCase = true) && src.contains("base64,")) {
+                        try {
+                            val rawBase64 = src.substringAfter("base64,")
+                            val bytes = android.util.Base64.decode(rawBase64, android.util.Base64.DEFAULT)
+                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let { bmp ->
+                                bitmaps.add(bmp)
+                                continue
+                            }
+                        } catch (_: Exception) {}
+                    } else if (src.startsWith("content://") || src.startsWith("file://")) {
+                        try {
+                            val parsedUri = Uri.parse(src)
+                            decodeSampledBitmapFromUri(context, parsedUri, maxDim, maxDim)?.let { bmp ->
+                                bitmaps.add(bmp)
+                                continue
+                            }
+                        } catch (_: Exception) {}
                     }
                 }
             }
 
-            // 3. Check if item text is a direct image URI string
+            // 4. Check if item text is a direct image URI or Base64 string
             val textStr = item.text?.toString()?.trim() ?: ""
             if (textStr.startsWith("content://") || textStr.startsWith("file://")) {
                 try {
                     val parsedUri = Uri.parse(textStr)
                     decodeSampledBitmapFromUri(context, parsedUri, maxDim, maxDim)?.let { bmp ->
                         bitmaps.add(bmp)
+                        continue
+                    }
+                } catch (_: Exception) {}
+            } else if (textStr.startsWith("data:image", ignoreCase = true) && textStr.contains("base64,")) {
+                try {
+                    val rawBase64 = textStr.substringAfter("base64,")
+                    val bytes = android.util.Base64.decode(rawBase64, android.util.Base64.DEFAULT)
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let { bmp ->
+                        bitmaps.add(bmp)
+                        continue
                     }
                 } catch (_: Exception) {}
             }

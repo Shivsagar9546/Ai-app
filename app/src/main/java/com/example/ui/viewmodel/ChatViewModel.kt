@@ -173,13 +173,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun decodeSampledBitmap(context: Context, uri: Uri, reqWidth: Int, reqHeight: Int): Bitmap? {
         return try {
-            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
-            if (bytes.isEmpty()) return null
-
             val options = BitmapFactory.Options().apply {
                 inJustDecodeBounds = true
             }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, options)
+            }
+            if (options.outWidth <= 0 || options.outHeight <= 0) return null
 
             var inSampleSize = 1
             if (options.outHeight > reqHeight || options.outWidth > reqWidth) {
@@ -192,9 +192,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             val decodeOptions = BitmapFactory.Options().apply {
                 this.inSampleSize = inSampleSize
-                inPreferredConfig = Bitmap.Config.RGB_565
+                this.inPreferredConfig = Bitmap.Config.RGB_565
             }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, decodeOptions)
+            }
         } catch (_: Exception) {
             null
         }

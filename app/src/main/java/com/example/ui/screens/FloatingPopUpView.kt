@@ -781,6 +781,10 @@ fun FloatingPopUpView(
                                     value = inputText,
                                     onValueChange = { inputText = it },
                                     placeholder = if (attachedBitmaps.isNotEmpty()) "Ask about these photos..." else "Ask about screen or type...",
+                                    onBitmapReceived = { bmp ->
+                                        attachedBitmaps = (attachedBitmaps + bmp).take(10)
+                                        Toast.makeText(context, "Pasted image from keyboard/clipboard", Toast.LENGTH_SHORT).show()
+                                    },
                                     onImageReceived = { clipData ->
                                         coroutineScope.launch {
                                             val bitmaps = com.example.util.ClipboardImageHelper.extractBitmapsFromClipData(context, clipData)
