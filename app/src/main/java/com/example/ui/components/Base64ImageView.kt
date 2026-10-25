@@ -57,7 +57,16 @@ fun Base64ImageView(
 ) {
     var isViewerOpen by remember { mutableStateOf(false) }
     val isFilePath = remember(base64String) {
-        base64String.isNotBlank() && (base64String.startsWith("/") || base64String.startsWith("file://"))
+        if (base64String.isBlank() || base64String.length > 2048) false
+        else {
+            val cleanPath = base64String.replace("file://", "")
+            (base64String.startsWith("file://") || cleanPath.startsWith("/")) && try {
+                val f = File(cleanPath)
+                f.exists() && f.isFile
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 
     if (isFilePath) {
@@ -78,7 +87,6 @@ fun Base64ImageView(
                     .clip(RoundedCornerShape(14.dp))
                     .heightIn(max = 240.dp)
                     .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     .clickable { isViewerOpen = true }
             )
         }
@@ -150,7 +158,7 @@ fun Base64ImageView(
                 }
                 val decodeOpts = BitmapFactory.Options().apply {
                     inSampleSize = sampleSize
-                    inPreferredConfig = Bitmap.Config.RGB_565
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
                 }
                 val decoded = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size, decodeOpts)
 
@@ -181,7 +189,6 @@ fun Base64ImageView(
                     .clip(RoundedCornerShape(14.dp))
                     .heightIn(max = 240.dp)
                     .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     .clickable { isViewerOpen = true }
             )
         }

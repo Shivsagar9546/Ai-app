@@ -101,7 +101,8 @@ class GeminiApiClient {
                 else if (!msg.imageBase64.isNullOrBlank()) listOf(msg.imageBase64)
                 else emptyList()
             } else {
-                if (!msg.imageBase64.isNullOrBlank()) listOf(msg.imageBase64)
+                // Keep image inline only for immediate preceding turn to avoid payload bloat & OOM
+                if (index >= messages.size - 2 && !msg.imageBase64.isNullOrBlank()) listOf(msg.imageBase64)
                 else emptyList()
             }
 
@@ -111,12 +112,24 @@ class GeminiApiClient {
                 } else {
                     listOf(imgData)
                 }
-            }.mapNotNull { imgData ->
-                if (imgData.isNotBlank() && (imgData.startsWith("/") || imgData.startsWith("file://"))) {
+            }.mapNotNull { rawImg ->
+                val imgData = rawImg.trim()
+                if (imgData.isBlank()) return@mapNotNull null
+
+                // A real file path MUST be reasonably short and actually exist on disk
+                val isRealFile = imgData.length <= 1024 && (
+                    imgData.startsWith("file://") ||
+                    (imgData.startsWith("/") && try {
+                        val f = java.io.File(imgData.replace("file://", ""))
+                        f.exists() && f.isFile
+                    } catch (_: Exception) { false })
+                )
+
+                if (isRealFile) {
                     try {
                         val path = imgData.replace("file://", "")
                         val file = java.io.File(path)
-                        if (file.exists()) {
+                        if (file.exists() && file.isFile) {
                             val bytes = file.readBytes()
                             android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
                         } else {
@@ -126,7 +139,12 @@ class GeminiApiClient {
                         null
                     }
                 } else {
-                    imgData
+                    // Already a valid Base64 string! Strip any data URI header if present
+                    if (imgData.contains(",")) {
+                        imgData.substringAfter(",")
+                    } else {
+                        imgData
+                    }
                 }
             }
 

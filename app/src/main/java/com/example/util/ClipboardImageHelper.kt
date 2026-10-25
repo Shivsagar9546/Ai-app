@@ -266,33 +266,31 @@ object ClipboardImageHelper {
         reqHeight: Int
     ): Bitmap? {
         return try {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: return null
+            if (bytes.isEmpty()) return null
+
             val options = BitmapFactory.Options().apply {
                 inJustDecodeBounds = true
             }
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                BitmapFactory.decodeStream(inputStream, null, options)
-            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
 
             if (options.outWidth <= 0 || options.outHeight <= 0) {
                 return null
             }
 
             var inSampleSize = 1
-            if (options.outHeight > reqHeight || options.outWidth > reqWidth) {
-                val halfHeight = options.outHeight / 2
-                val halfWidth = options.outWidth / 2
-                while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
-                    inSampleSize *= 2
-                }
+            val width = options.outWidth
+            val height = options.outHeight
+            while ((width / inSampleSize) > reqWidth || (height / inSampleSize) > reqHeight) {
+                inSampleSize *= 2
             }
 
             val decodeOptions = BitmapFactory.Options().apply {
                 this.inSampleSize = inSampleSize
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                BitmapFactory.decodeStream(inputStream, null, decodeOptions)
-            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to decode URI $uri: ${e.message}")
             null

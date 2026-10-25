@@ -61,7 +61,8 @@ data class AdminSettings(
     val bubbleText: String = "AI ✨",
     val bubbleGradient: String = "purple", // "purple", "cyan", "sunset", "emerald", "dark", "gold"
     val bubbleSize: String = "medium", // "small", "medium", "large"
-    val bubbleAlpha: Float = 1.0f
+    val bubbleAlpha: Float = 1.0f,
+    val firebaseWebClientId: String = ""
 ) {
     fun getActiveGeminiApiKeys(): List<String> {
         return listOf(geminiApiKey, geminiApiKey2, geminiApiKey3, geminiApiKey4)
@@ -157,6 +158,7 @@ class AdminPreferencesRepository(val context: Context) {
         val BUBBLE_GRADIENT = stringPreferencesKey("bubble_gradient")
         val BUBBLE_SIZE = stringPreferencesKey("bubble_size")
         val BUBBLE_ALPHA = androidx.datastore.preferences.core.floatPreferencesKey("bubble_alpha")
+        val FIREBASE_WEB_CLIENT_ID = stringPreferencesKey("firebase_web_client_id")
 
         val TOTAL_REQUESTS = intPreferencesKey("total_requests")
         val TODAY_REQUESTS = intPreferencesKey("today_requests")
@@ -225,6 +227,7 @@ class AdminPreferencesRepository(val context: Context) {
             bubbleGradient = preferences[PreferencesKeys.BUBBLE_GRADIENT] ?: "purple",
             bubbleSize = preferences[PreferencesKeys.BUBBLE_SIZE] ?: "medium",
             bubbleAlpha = preferences[PreferencesKeys.BUBBLE_ALPHA] ?: 1.0f,
+            firebaseWebClientId = preferences[PreferencesKeys.FIREBASE_WEB_CLIENT_ID] ?: "",
             totalRequests = preferences[PreferencesKeys.TOTAL_REQUESTS] ?: 0,
             todayRequests = todayCount,
             geminiRequests = preferences[PreferencesKeys.GEMINI_REQUESTS] ?: 0,
@@ -273,10 +276,12 @@ class AdminPreferencesRepository(val context: Context) {
         bubbleText: String? = null,
         bubbleGradient: String? = null,
         bubbleSize: String? = null,
-        bubbleAlpha: Float? = null
+        bubbleAlpha: Float? = null,
+        firebaseWebClientId: String? = null
     ) {
         context.dataStore.edit { preferences ->
             defaultProvider?.let { preferences[PreferencesKeys.DEFAULT_PROVIDER] = it }
+            firebaseWebClientId?.let { preferences[PreferencesKeys.FIREBASE_WEB_CLIENT_ID] = it.trim() }
             geminiApiKey?.let { preferences[PreferencesKeys.GEMINI_API_KEY] = it }
             geminiApiKey2?.let { preferences[PreferencesKeys.GEMINI_API_KEY_2] = it }
             geminiApiKey3?.let { preferences[PreferencesKeys.GEMINI_API_KEY_3] = it }

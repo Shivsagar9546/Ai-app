@@ -234,31 +234,27 @@ class RichContentEditText @JvmOverloads constructor(
 
     private fun decodeUriSafely(context: Context, uri: Uri): Bitmap? {
         return try {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: return null
+            if (bytes.isEmpty()) return null
+
             val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, boundsOpts)
-            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, boundsOpts)
             if (boundsOpts.outWidth <= 0 || boundsOpts.outHeight <= 0) return null
 
             var inSampleSize = 1
             val maxDim = 1200
             val width = boundsOpts.outWidth
             val height = boundsOpts.outHeight
-            if (width > maxDim || height > maxDim) {
-                val halfW = width / 2
-                val halfH = height / 2
-                while ((halfW / inSampleSize) >= maxDim && (halfH / inSampleSize) >= maxDim) {
-                    inSampleSize *= 2
-                }
+            while ((width / inSampleSize) > maxDim || (height / inSampleSize) > maxDim) {
+                inSampleSize *= 2
             }
 
             val decodeOpts = BitmapFactory.Options().apply {
                 this.inSampleSize = inSampleSize
                 this.inPreferredConfig = Bitmap.Config.ARGB_8888
             }
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, decodeOpts)
-            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts)
         } catch (e: Exception) {
             Log.e(tag, "decodeUriSafely failed for $uri: ${e.message}")
             null

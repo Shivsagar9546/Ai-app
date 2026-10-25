@@ -16,12 +16,16 @@ class OmniAIApplication : Application() {
     lateinit var adminPreferences: AdminPreferencesRepository
         private set
 
+    lateinit var firestoreSyncRepository: com.example.data.firebase.FirestoreSyncRepository
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
 
         database = AppDatabase.getDatabase(this)
         adminPreferences = AdminPreferencesRepository(this)
+        firestoreSyncRepository = com.example.data.firebase.FirestoreSyncRepository(this)
 
         createNotificationChannels()
         com.example.service.TtsManager.init(this)

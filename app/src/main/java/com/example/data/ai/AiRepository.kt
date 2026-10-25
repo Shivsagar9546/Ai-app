@@ -34,9 +34,9 @@ class AiRepository(
             return@withContext AiResult.Error("The Screen Assistant is currently undergoing maintenance. Please try again later.")
         }
 
-        // Check Daily Quota Limit
-        if (settings.todayRequests >= advanced.dailyQuotaLimit) {
-            return@withContext AiResult.Error("Daily scan quota limit of ${advanced.dailyQuotaLimit} reached. Please contact your administrator.")
+        // Check Daily Quota Limit only if an administrator explicitly set a positive cap (> 0)
+        if (advanced.dailyQuotaLimit in 1..999998 && settings.todayRequests >= advanced.dailyQuotaLimit) {
+            return@withContext AiResult.Error("Daily scan quota limit of ${advanced.dailyQuotaLimit} reached. You can adjust or disable this in Admin Settings.")
         }
 
         // Check if screen scan is disabled by admin
@@ -246,8 +246,20 @@ class AiRepository(
             }
 
             val outputStream = ByteArrayOutputStream(32 * 1024)
-            // 70% JPEG produces crisp, legible text and diagrams with ultra-compact payload (~35KB)
-            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
+            val finalBitmapToCompress = if (scaledBitmap.hasAlpha()) {
+                val opaque = Bitmap.createBitmap(scaledBitmap.width, scaledBitmap.height, Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(opaque)
+                canvas.drawColor(android.graphics.Color.WHITE)
+                canvas.drawBitmap(scaledBitmap, 0f, 0f, null)
+                opaque
+            } else {
+                scaledBitmap
+            }
+
+            finalBitmapToCompress.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
+            if (finalBitmapToCompress != scaledBitmap && finalBitmapToCompress != bitmap) {
+                try { finalBitmapToCompress.recycle() } catch (_: Exception) {}
+            }
             if (scaledBitmap != bitmap) {
                 try {
                     scaledBitmap.recycle()

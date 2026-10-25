@@ -1,5 +1,6 @@
 package com.example.ui.viewmodel
 
+import android.app.Activity
 import android.app.Application
 import android.content.ClipData
 import android.content.Context
@@ -18,9 +19,12 @@ import com.example.OmniAIApplication
 import com.example.data.ai.AiMessage
 import com.example.data.ai.AiRepository
 import com.example.data.ai.AiResult
+import com.example.data.firebase.CloudSyncState
+import com.example.data.firebase.FirestoreSyncRepository
 import com.example.data.local.ChatMessage
 import com.example.data.local.Conversation
 import com.example.data.preferences.AdminSettings
+import com.google.firebase.auth.FirebaseUser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -173,30 +177,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun decodeSampledBitmap(context: Context, uri: Uri, reqWidth: Int, reqHeight: Int): Bitmap? {
         return try {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: return null
+            if (bytes.isEmpty()) return null
+
             val options = BitmapFactory.Options().apply {
                 inJustDecodeBounds = true
             }
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, options)
-            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
             if (options.outWidth <= 0 || options.outHeight <= 0) return null
 
             var inSampleSize = 1
-            if (options.outHeight > reqHeight || options.outWidth > reqWidth) {
-                val halfHeight: Int = options.outHeight / 2
-                val halfWidth: Int = options.outWidth / 2
-                while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
-                    inSampleSize *= 2
-                }
+            val width = options.outWidth
+            val height = options.outHeight
+            while ((width / inSampleSize) > reqWidth || (height / inSampleSize) > reqHeight) {
+                inSampleSize *= 2
             }
 
             val decodeOptions = BitmapFactory.Options().apply {
                 this.inSampleSize = inSampleSize
-                this.inPreferredConfig = Bitmap.Config.RGB_565
+                this.inPreferredConfig = Bitmap.Config.ARGB_8888
             }
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, decodeOptions)
-            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
         } catch (_: Exception) {
             null
         }
@@ -300,7 +302,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                 scaled = Bitmap.createScaledBitmap(bmp, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
                             }
                             val outputStream = java.io.ByteArrayOutputStream()
-                            scaled.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
+                            val finalToCompress = if (scaled.hasAlpha()) {
+                                val opaque = Bitmap.createBitmap(scaled.width, scaled.height, Bitmap.Config.ARGB_8888)
+                                val canvas = android.graphics.Canvas(opaque)
+                                canvas.drawColor(android.graphics.Color.WHITE)
+                                canvas.drawBitmap(scaled, 0f, 0f, null)
+                                opaque
+                            } else {
+                                scaled
+                            }
+                            finalToCompress.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
+                            if (finalToCompress != scaled && finalToCompress != bmp) {
+                                try { finalToCompress.recycle() } catch (_: Exception) {}
+                            }
                             val bytes = outputStream.toByteArray()
                             if (scaled != bmp) {
                                 scaled.recycle()
@@ -532,11 +546,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         bubbleText: String? = null,
         bubbleGradient: String? = null,
         bubbleSize: String? = null,
-        bubbleAlpha: Float? = null
+        bubbleAlpha: Float? = null,
+        firebaseWebClientId: String? = null
     ) {
         viewModelScope.launch {
             adminPrefs.updateSettings(
                 defaultProvider = defaultProvider,
+                firebaseWebClientId = firebaseWebClientId,
                 geminiApiKey = geminiApiKey,
                 geminiApiKey2 = geminiApiKey2,
                 geminiApiKey3 = geminiApiKey3,
@@ -689,6 +705,39 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun resetStats() {
         viewModelScope.launch {
             adminPrefs.resetStats()
+        }
+    }
+
+    val firestoreSync: FirestoreSyncRepository = app.firestoreSyncRepository
+    val cloudSyncState: StateFlow<CloudSyncState> = firestoreSync.syncState
+
+    fun backupChatsToCloud(onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val allConvs = conversations.value
+            val result = firestoreSync.backupConversationsToCloud(allConvs) { convId ->
+                chatDao.getMessagesList(convId)
+            }
+            if (result.isSuccess) {
+                onResult(true, "Successfully backed up ${result.getOrNull()} conversations to Cloud Firestore!")
+            } else {
+                onResult(false, result.exceptionOrNull()?.localizedMessage ?: "Backup failed")
+            }
+        }
+    }
+
+    fun restoreChatsFromCloud(onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val result = firestoreSync.restoreConversationsFromCloud { conv, messages ->
+                chatDao.insertConversation(conv)
+                for (msg in messages) {
+                    chatDao.insertMessage(msg)
+                }
+            }
+            if (result.isSuccess) {
+                onResult(true, "Restored ${result.getOrNull()} conversations from Cloud Firestore!")
+            } else {
+                onResult(false, result.exceptionOrNull()?.localizedMessage ?: "Restore failed")
+            }
         }
     }
 }

@@ -22,7 +22,7 @@ class AdvancedSettingsHelper(private val context: Context) {
         set(value) = prefs.edit().putString("gemini_api_key_5", value).apply()
 
     var dailyQuotaLimit: Int
-        get() = prefs.getInt("daily_quota_limit", 100)
+        get() = prefs.getInt("daily_quota_limit", 0) // 0 means Unlimited (no quota or hit limit)
         set(value) = prefs.edit().putInt("daily_quota_limit", value).apply()
 
     var isMaintenanceMode: Boolean

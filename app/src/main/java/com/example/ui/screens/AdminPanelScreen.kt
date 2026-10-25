@@ -1167,12 +1167,12 @@ fun AdminPanelScreen(
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                                 )
                                 Text(
-                                    text = "${dailyQuotaInput.toInt()} Scans",
+                                    text = if (dailyQuotaInput.toInt() <= 0 || dailyQuotaInput.toInt() >= 1000) "Unlimited (No Limit)" else "${dailyQuotaInput.toInt()} Scans",
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                                 )
                             }
                             Text(
-                                text = "Enforces request capping to prevent personal key overruns or abuse",
+                                text = "Enforces request capping to prevent personal key overruns. 0 or 1000 = Unlimited hits.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1180,10 +1180,10 @@ fun AdminPanelScreen(
                                 value = dailyQuotaInput,
                                 onValueChange = {
                                     dailyQuotaInput = it
-                                    advancedHelper.dailyQuotaLimit = it.toInt()
+                                    advancedHelper.dailyQuotaLimit = if (it.toInt() >= 1000) 0 else it.toInt()
                                 },
-                                valueRange = 10f..500f,
-                                steps = 49
+                                valueRange = 0f..1000f,
+                                steps = 99
                             )
                         }
 

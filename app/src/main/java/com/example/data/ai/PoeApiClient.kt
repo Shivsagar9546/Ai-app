@@ -63,12 +63,20 @@ class PoeApiClient {
                 msgObj.put("role", role)
 
                 val rawImgData = if (index == messages.lastIndex) (imageInlineBase64 ?: msg.imageBase64) else msg.imageBase64
-                val imgData = rawImgData?.let { pathOrBase64 ->
-                    if (pathOrBase64.isNotBlank() && (pathOrBase64.startsWith("/") || pathOrBase64.startsWith("file://"))) {
+                val imgData = rawImgData?.let { raw ->
+                    val pathOrBase64 = raw.trim()
+                    val isRealFile = pathOrBase64.length <= 1024 && (
+                        pathOrBase64.startsWith("file://") ||
+                        (pathOrBase64.startsWith("/") && try {
+                            val f = java.io.File(pathOrBase64.replace("file://", ""))
+                            f.exists() && f.isFile
+                        } catch (_: Exception) { false })
+                    )
+                    if (isRealFile) {
                         try {
                             val path = pathOrBase64.replace("file://", "")
                             val file = java.io.File(path)
-                            if (file.exists()) {
+                            if (file.exists() && file.isFile) {
                                 val bytes = file.readBytes()
                                 android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
                             } else {
@@ -78,7 +86,7 @@ class PoeApiClient {
                             null
                         }
                     } else {
-                        pathOrBase64
+                        if (pathOrBase64.contains(",")) pathOrBase64.substringAfter(",") else pathOrBase64
                     }
                 }
 

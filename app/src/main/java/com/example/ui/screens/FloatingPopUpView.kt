@@ -477,7 +477,7 @@ fun FloatingPopUpView(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 10.dp)
                             ) {
-                                items(messages, key = { "${it.id}_${it.role}_${it.timestamp}" }) { msg ->
+                                items(messages, key = { "${it.id}_${it.role}_${it.timestamp}_${it.hashCode()}" }) { msg ->
                                     FloatingMessageBubble(
                                         msg = msg,
                                         isSpeaking = (currentlySpeakingText == msg.text),

@@ -113,12 +113,18 @@ class FloatingImagePickerActivity : ComponentActivity() {
             return
         }
         try {
+            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            if (bytes == null || bytes.isEmpty()) {
+                Toast.makeText(this, "Could not load image file", Toast.LENGTH_SHORT).show()
+                FloatingAssistantService.activeServiceInstance?.showPopup()
+                safeFinish()
+                return
+            }
+
             val boundsOptions = BitmapFactory.Options().apply {
                 inJustDecodeBounds = true
             }
-            contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, boundsOptions)
-            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, boundsOptions)
 
             if (boundsOptions.outWidth <= 0 || boundsOptions.outHeight <= 0) {
                 Toast.makeText(this, "Could not load image dimensions", Toast.LENGTH_SHORT).show()
@@ -131,12 +137,8 @@ class FloatingImagePickerActivity : ComponentActivity() {
             val maxDim = 1280
             val origWidth = boundsOptions.outWidth
             val origHeight = boundsOptions.outHeight
-            if (origWidth > maxDim || origHeight > maxDim) {
-                val halfWidth = origWidth / 2
-                val halfHeight = origHeight / 2
-                while ((halfWidth / sampleSize) >= maxDim && (halfHeight / sampleSize) >= maxDim) {
-                    sampleSize *= 2
-                }
+            while ((origWidth / sampleSize) > maxDim || (origHeight / sampleSize) > maxDim) {
+                sampleSize *= 2
             }
 
             val decodeOptions = BitmapFactory.Options().apply {
@@ -144,9 +146,7 @@ class FloatingImagePickerActivity : ComponentActivity() {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
 
-            val bitmap = contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, decodeOptions)
-            }
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
 
             if (bitmap != null) {
                 val scaled = scaleDownBitmap(bitmap, 1280)

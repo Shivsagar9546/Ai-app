@@ -1,6 +1,7 @@
 package com.example.service
 
 import android.annotation.SuppressLint
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
@@ -11,6 +12,7 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.util.DisplayMetrics
@@ -77,9 +79,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -100,7 +104,11 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     override val viewModelStore: ViewModelStore get() = appViewModelStore
 
     private lateinit var windowManager: WindowManager
-    private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
+    private val serviceJob = SupervisorJob()
+    private val coroutineExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        android.util.Log.e("FloatingService", "Safe caught coroutine error: ${throwable.message}", throwable)
+    }
+    private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob + coroutineExceptionHandler)
 
     private lateinit var aiRepository: AiRepository
     private var textToSpeech: TextToSpeech? = null
@@ -163,6 +171,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     private var savedPopupX: Int = 0
     private var savedPopupY: Int = 0
     private var savedPopupAlpha: Float = 1.0f
+    private var isExplicitStop: Boolean = false
 
     override fun onCreate() {
         super.onCreate()
@@ -222,7 +231,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             val channel = android.app.NotificationChannel(
                 OmniAIApplication.CHANNEL_FLOATING_SERVICE,
                 "Floating Assistant (Silent)",
-                android.app.NotificationManager.IMPORTANCE_MIN
+                android.app.NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Silent background channel for floating assistant"
                 setShowBadge(false)
@@ -283,7 +292,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             .setContentTitle("OmniAI Assistant")
             .setContentText("Floating Assistant Active")
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -298,7 +307,8 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                 startForeground(
                     NOTIFICATION_ID,
                     notification,
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
                 )
             } else {
                 startForeground(NOTIFICATION_ID, notification)
@@ -324,27 +334,27 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     private fun safelyRemoveView(viewToRemove: View?) {
         if (viewToRemove == null) return
         try {
+            (viewToRemove as? ComposeView)?.disposeComposition()
+        } catch (_: Throwable) {}
+        try {
             viewToRemove.visibility = View.GONE
-        } catch (e: Exception) {}
+        } catch (_: Throwable) {}
         try {
             if (viewToRemove.isAttachedToWindow) {
-                windowManager.removeView(viewToRemove)
+                windowManager.removeViewImmediate(viewToRemove)
             }
-        } catch (e: Exception) {
+        } catch (_: Throwable) {
             try {
-                viewToRemove.post {
-                    try {
-                        if (viewToRemove.isAttachedToWindow) {
-                            windowManager.removeView(viewToRemove)
-                        }
-                    } catch (ex: Exception) {}
+                if (viewToRemove.isAttachedToWindow) {
+                    windowManager.removeView(viewToRemove)
                 }
-            } catch (ex: Exception) {}
+            } catch (_: Throwable) {}
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP_SERVICE) {
+            isExplicitStop = true
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
@@ -356,6 +366,8 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             stopSelf()
             return START_NOT_STICKY
         }
+
+        isExplicitStop = false
 
         // CRITICAL: Call startForeground immediately to avoid ForegroundServiceDidNotStartInTimeException
         startForegroundServiceNotification()
@@ -392,21 +404,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         hideOcrGrabber()
         hideQuickHud()
 
-        val existing = bubbleView
-        if (existing != null) {
-            try {
-                existing.visibility = View.VISIBLE
-                if (existing.isAttachedToWindow) {
-                    windowManager.updateViewLayout(existing, bubbleParams)
-                }
-                return
-            } catch (e: Exception) {
-                try {
-                    safelyRemoveView(existing)
-                } catch (ex: Exception) {}
-                bubbleView = null
-            }
-        }
+        updateScreenDimensions()
 
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -415,16 +413,37 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
-        bubbleParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            layoutFlag,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = (screenWidth - 220).coerceAtLeast(20)
-            y = screenHeight / 3
+        if (bubbleParams == null) {
+            bubbleParams = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                layoutFlag,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = (screenWidth - 220).coerceAtLeast(20)
+                y = screenHeight / 3
+            }
+        }
+
+        val existing = bubbleView
+        if (existing != null) {
+            try {
+                existing.visibility = View.VISIBLE
+                if (existing.isAttachedToWindow) {
+                    windowManager.updateViewLayout(existing, bubbleParams)
+                    return
+                } else {
+                    windowManager.addView(existing, bubbleParams)
+                    return
+                }
+            } catch (e: Exception) {
+                try {
+                    safelyRemoveView(existing)
+                } catch (ex: Exception) {}
+                bubbleView = null
+            }
         }
 
         val newBubbleView = ComposeView(this).apply {
@@ -460,8 +479,10 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                                 params.x = (params.x + dx.toInt()).coerceIn(0, maxX)
                                 params.y = (params.y + dy.toInt()).coerceIn(0, maxY)
                                 try {
-                                    windowManager.updateViewLayout(bubbleView, params)
-                                } catch (e: Exception) {}
+                                    if (bubbleView?.isAttachedToWindow == true) {
+                                        windowManager.updateViewLayout(bubbleView, params)
+                                    }
+                                } catch (_: Throwable) {}
                             }
                         },
                         onDragEnd = {
@@ -474,8 +495,10 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                                 params.x = params.x.coerceIn(0, maxX)
                                 params.y = params.y.coerceIn(0, maxY)
                                 try {
-                                    windowManager.updateViewLayout(bubbleView, params)
-                                } catch (e: Exception) {}
+                                    if (bubbleView?.isAttachedToWindow == true) {
+                                        windowManager.updateViewLayout(bubbleView, params)
+                                    }
+                                } catch (_: Throwable) {}
                             }
                         },
                         onBubbleClick = {
@@ -507,6 +530,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                             startActivity(intent)
                         },
                         onClose = {
+                            isExplicitStop = true
                             stopSelf()
                         }
                     )
@@ -516,9 +540,15 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
 
         bubbleView = newBubbleView
         try {
-            windowManager.addView(newBubbleView, bubbleParams)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Failed to display floating bubble: ${e.message}", Toast.LENGTH_SHORT).show()
+            if (!newBubbleView.isAttachedToWindow) {
+                windowManager.addView(newBubbleView, bubbleParams)
+            } else {
+                windowManager.updateViewLayout(newBubbleView, bubbleParams)
+            }
+        } catch (_: Throwable) {
+            try {
+                windowManager.updateViewLayout(newBubbleView, bubbleParams)
+            } catch (_: Throwable) {}
         }
     }
 
@@ -549,9 +579,14 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                     params.x = savedPopupX
                     params.y = savedPopupY
                     params.alpha = savedPopupAlpha.coerceIn(0.25f, 1.0f)
-                    windowManager.updateViewLayout(popupView, params)
+                    if (popupView?.isAttachedToWindow == true) {
+                        windowManager.updateViewLayout(popupView, params)
+                        return
+                    } else {
+                        windowManager.addView(popupView, params)
+                        return
+                    }
                 }
-                return
             } catch (e: Exception) {
                 hidePopup()
             }
@@ -726,9 +761,15 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         }
 
         try {
-            windowManager.addView(popupView, popupParams)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Failed to display popup: ${e.message}", Toast.LENGTH_SHORT).show()
+            if (popupView?.isAttachedToWindow == false) {
+                windowManager.addView(popupView, popupParams)
+            } else {
+                windowManager.updateViewLayout(popupView, popupParams)
+            }
+        } catch (_: Throwable) {
+            try {
+                windowManager.updateViewLayout(popupView, popupParams)
+            } catch (_: Throwable) {}
         }
     }
 
@@ -1375,7 +1416,19 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                                 scaled = Bitmap.createScaledBitmap(bitmap, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
                             }
                             val outputStream = java.io.ByteArrayOutputStream()
-                            scaled.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
+                            val finalToCompress = if (scaled.hasAlpha()) {
+                                val opaque = Bitmap.createBitmap(scaled.width, scaled.height, Bitmap.Config.ARGB_8888)
+                                val canvas = android.graphics.Canvas(opaque)
+                                canvas.drawColor(android.graphics.Color.WHITE)
+                                canvas.drawBitmap(scaled, 0f, 0f, null)
+                                opaque
+                            } else {
+                                scaled
+                            }
+                            finalToCompress.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
+                            if (finalToCompress != scaled && finalToCompress != bitmap) {
+                                try { finalToCompress.recycle() } catch (_: Exception) {}
+                            }
                             val bytes = outputStream.toByteArray()
                             if (scaled != bitmap) {
                                 scaled.recycle()
@@ -1415,8 +1468,10 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                 } catch (e: Exception) {}
             }
 
-            val aiMessages = _messages.value.map {
-                AiMessage(role = it.role, text = it.text, imageBase64 = it.imageBase64)
+            val allMsgs = _messages.value
+            val aiMessages = allMsgs.mapIndexed { idx, it ->
+                val imgData = if (idx >= allMsgs.size - 2) it.imageBase64 else null
+                AiMessage(role = it.role, text = it.text, imageBase64 = imgData)
             }
 
             val result = withContext(Dispatchers.IO) {
@@ -1537,7 +1592,83 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         }
     }
 
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        updateScreenDimensions()
+        bubbleParams?.let { params ->
+            val bubbleW = bubbleView?.width?.takeIf { it > 0 } ?: 160
+            val bubbleH = bubbleView?.height?.takeIf { it > 0 } ?: 160
+            val maxX = (screenWidth - bubbleW).coerceAtLeast(0)
+            val maxY = (screenHeight - bubbleH).coerceAtLeast(0)
+            params.x = params.x.coerceIn(0, maxX)
+            params.y = params.y.coerceIn(0, maxY)
+            try {
+                if (bubbleView?.isAttachedToWindow == true) {
+                    windowManager.updateViewLayout(bubbleView, params)
+                }
+            } catch (_: Throwable) {}
+        }
+        popupParams?.let { params ->
+            val maxW = (screenWidth - 20).coerceAtLeast(320)
+            val maxH = (screenHeight - 60).coerceAtLeast(400)
+            if (params.width > maxW) params.width = maxW
+            if (params.height > maxH) params.height = maxH
+            val maxDispX = ((screenWidth - params.width) / 2).coerceAtLeast(0)
+            val maxDispY = ((screenHeight - params.height) / 2).coerceAtLeast(0)
+            params.x = params.x.coerceIn(-maxDispX, maxDispX)
+            params.y = params.y.coerceIn(-maxDispY, maxDispY)
+            try {
+                if (popupView?.isAttachedToWindow == true) {
+                    windowManager.updateViewLayout(popupView, params)
+                }
+            } catch (_: Throwable) {}
+        }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_MODERATE) {
+            _attachedImage.value = null
+            cropBackgroundBitmap?.let {
+                if (!it.isRecycled) {
+                    it.recycle()
+                }
+            }
+            cropBackgroundBitmap = null
+            System.gc()
+        }
+    }
+
+    private fun scheduleResurrection() {
+        if (isExplicitStop) return
+        try {
+            val restartIntent = Intent(applicationContext, FloatingAssistantService::class.java).apply {
+                action = ACTION_SHOW_BUBBLE
+            }
+            val flags = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0) or PendingIntent.FLAG_UPDATE_CURRENT
+            val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                PendingIntent.getForegroundService(applicationContext, 999, restartIntent, flags)
+            } else {
+                PendingIntent.getService(applicationContext, 999, restartIntent, flags)
+            }
+            val alarmMgr = getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+            alarmMgr?.set(
+                AlarmManager.ELAPSED_REALTIME,
+                SystemClock.elapsedRealtime() + 1000,
+                pendingIntent
+            )
+        } catch (_: Throwable) {}
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // If app is swiped away from Recents or process killed under memory/thermal load, resurrect bubble
+        scheduleResurrection()
+    }
+
     override fun onDestroy() {
+        // If terminated by system due to low memory or thermal throttle, schedule immediate resurrection
+        scheduleResurrection()
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 stopForeground(STOP_FOREGROUND_REMOVE)

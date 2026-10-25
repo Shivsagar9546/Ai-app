@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "UserProfile": {
+      "collection": "users",
+      "fields": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      }
+    },
+    "Conversation": {
+      "collection": "users/{userId}/conversations",
+      "fields": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" },
+        "modelUsed": { "type": "string" }
+      }
+    },
+    "ChatMessage": {
+      "collection": "users/{userId}/conversations/{conversationId}/messages",
+      "fields": {
+        "id": { "type": "string" },
+        "conversationId": { "type": "string" },
+        "role": { "type": "string" },
+        "content": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "modelUsed": { "type": "string" }
+      }
+    },
+    "CustomPrompt": {
+      "collection": "users/{userId}/custom_prompts",
+      "fields": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "category": { "type": "string" },
+        "updatedAt": { "type": "timestamp" }
+      }
+    }
+  }
+}
