@@ -340,26 +340,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             // Ensure conversation row exists in DB
             val existing = chatDao.getConversationById(convId)
-            if (existing == null) {
-                chatDao.insertConversation(
-                    Conversation(
-                        id = convId,
-                        title = if (text.isNotBlank()) text.take(32) else "Image Query (${images.size} photos)",
-                        updatedAt = System.currentTimeMillis(),
-                        lastMessagePreview = text.ifBlank { "Attached ${images.size} photo(s)" }
-                    )
+            val updatedConv = if (existing == null) {
+                val newConv = Conversation(
+                    id = convId,
+                    title = if (text.isNotBlank()) text.take(32) else "Image Query (${images.size} photos)",
+                    updatedAt = System.currentTimeMillis(),
+                    lastMessagePreview = text.ifBlank { "Attached ${images.size} photo(s)" }
                 )
+                chatDao.insertConversation(newConv)
+                newConv
             } else {
-                chatDao.updateConversation(
-                    existing.copy(
-                        updatedAt = System.currentTimeMillis(),
-                        lastMessagePreview = text.ifBlank { "Attached ${images.size} photo(s)" }
-                    )
+                val modified = existing.copy(
+                    updatedAt = System.currentTimeMillis(),
+                    lastMessagePreview = text.ifBlank { "Attached ${images.size} photo(s)" }
                 )
+                chatDao.updateConversation(modified)
+                modified
             }
-
-            // Insert user message
-            chatDao.insertMessage(userMessage)
+            // Insert user message locally (0ms instant Room persistence)
+            val userMsgId = chatDao.insertMessage(userMessage)
 
             // Gather context history with imageBase64 preservation
             val history = chatDao.getMessagesList(convId)
@@ -382,8 +381,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _statusMessage.value = null
             _streamingText.value = null
 
-
-
             when (result) {
                 is AiResult.Success -> {
                     val modelMessage = ChatMessage(
@@ -393,6 +390,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         timestamp = System.currentTimeMillis()
                     )
                     chatDao.insertMessage(modelMessage)
+                    dispatchMicroDeltaSync(convId)
                 }
                 is AiResult.Error -> {
                     val errorMessage = ChatMessage(
@@ -403,6 +401,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         timestamp = System.currentTimeMillis()
                     )
                     chatDao.insertMessage(errorMessage)
+                    dispatchMicroDeltaSync(convId)
                 }
             }
         }
@@ -438,25 +437,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _streamingText.value = null
             when (result) {
                 is AiResult.Success -> {
-                    chatDao.insertMessage(
-                        ChatMessage(
-                            conversationId = convId,
-                            role = "model",
-                            text = result.text,
-                            timestamp = System.currentTimeMillis()
-                        )
+                    val newMsg = ChatMessage(
+                        conversationId = convId,
+                        role = "model",
+                        text = result.text,
+                        timestamp = System.currentTimeMillis()
                     )
+                    chatDao.insertMessage(newMsg)
+                    dispatchMicroDeltaSync(convId)
                 }
                 is AiResult.Error -> {
-                    chatDao.insertMessage(
-                        ChatMessage(
-                            conversationId = convId,
-                            role = "model",
-                            text = "⚠️ ${result.message}",
-                            isError = true,
-                            timestamp = System.currentTimeMillis()
-                        )
+                    val err = ChatMessage(
+                        conversationId = convId,
+                        role = "model",
+                        text = "⚠️ ${result.message}",
+                        isError = true,
+                        timestamp = System.currentTimeMillis()
                     )
+                    chatDao.insertMessage(err)
+                    dispatchMicroDeltaSync(convId)
                 }
             }
         }
@@ -486,7 +485,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteConversation(id: String) {
         viewModelScope.launch {
+            chatDao.deleteMessagesForConversation(id)
             chatDao.deleteConversation(id)
+            firestoreSync.deleteConversationFromCloud(id)
             if (_currentConversationId.value == id) {
                 startNewChat()
             }
@@ -495,7 +496,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearAllHistory() {
         viewModelScope.launch {
+            chatDao.clearAllMessages()
             chatDao.clearAllConversations()
+            firestoreSync.clearAllCloudBackup()
             startNewChat()
         }
     }
@@ -737,6 +740,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 onResult(true, "Restored ${result.getOrNull()} conversations from Cloud Firestore!")
             } else {
                 onResult(false, result.exceptionOrNull()?.localizedMessage ?: "Restore failed")
+            }
+        }
+    }
+
+    /**
+     * Micro Delta Batch Sync:
+     * Dispatches dirty/incremental changes in an asynchronous non-blocking background batch
+     * so that the local Room SQLite UI remains instantaneous (0ms) and never lags.
+     */
+    fun dispatchMicroDeltaSync(convId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val conv = chatDao.getConversationById(convId) ?: return@launch
+                val messages = chatDao.getMessagesList(convId)
+                firestoreSync.syncDeltaBatch(conv, messages)
+            } catch (e: Exception) {
+                // Background delta sync is non-blocking and silent
             }
         }
     }

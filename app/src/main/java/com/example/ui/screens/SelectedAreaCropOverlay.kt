@@ -253,22 +253,24 @@ fun SelectedAreaCropOverlay(
                             val selHeight = selBottom - selTop
 
                             if (selWidth > 20f && selHeight > 20f) {
-                                // Obtain actual display pixel metrics for accurate scaling
                                 val wm = context.getSystemService(android.content.Context.WINDOW_SERVICE) as? android.view.WindowManager
                                 val displayMetrics = android.util.DisplayMetrics()
                                 @Suppress("DEPRECATION")
                                 wm?.defaultDisplay?.getRealMetrics(displayMetrics)
-                                val realDisplayW = displayMetrics.widthPixels
-                                val realDisplayH = displayMetrics.heightPixels
+                                val fallbackW = displayMetrics.widthPixels
+                                val fallbackH = displayMetrics.heightPixels
 
-                                val finalRect = if (overlaySize.width > 0 && overlaySize.height > 0 && realDisplayW > 0 && realDisplayH > 0) {
-                                    val scaleX = realDisplayW.toFloat() / overlaySize.width.toFloat()
-                                    val scaleY = realDisplayH.toFloat() / overlaySize.height.toFloat()
+                                val targetW = if (backgroundImage != null && !backgroundImage.isRecycled) backgroundImage.width else fallbackW
+                                val targetH = if (backgroundImage != null && !backgroundImage.isRecycled) backgroundImage.height else fallbackH
 
-                                    val pxLeft = (selLeft * scaleX).toInt().coerceIn(0, realDisplayW - 1)
-                                    val pxTop = (selTop * scaleY).toInt().coerceIn(0, realDisplayH - 1)
-                                    val pxRight = (selRight * scaleX).toInt().coerceIn(pxLeft + 1, realDisplayW)
-                                    val pxBottom = (selBottom * scaleY).toInt().coerceIn(pxTop + 1, realDisplayH)
+                                val finalRect = if (overlaySize.width > 0 && overlaySize.height > 0 && targetW > 0 && targetH > 0) {
+                                    val scaleX = targetW.toFloat() / overlaySize.width.toFloat()
+                                    val scaleY = targetH.toFloat() / overlaySize.height.toFloat()
+
+                                    val pxLeft = (selLeft * scaleX).toInt().coerceIn(0, targetW - 1)
+                                    val pxTop = (selTop * scaleY).toInt().coerceIn(0, targetH - 1)
+                                    val pxRight = (selRight * scaleX).toInt().coerceIn(pxLeft + 1, targetW)
+                                    val pxBottom = (selBottom * scaleY).toInt().coerceIn(pxTop + 1, targetH)
                                     Rect(pxLeft, pxTop, pxRight, pxBottom)
                                 } else {
                                     Rect(selLeft.toInt(), selTop.toInt(), selRight.toInt(), selBottom.toInt())

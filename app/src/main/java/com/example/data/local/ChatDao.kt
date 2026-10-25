@@ -49,6 +49,9 @@ interface ChatDao {
     @Query("DELETE FROM chat_messages WHERE conversationId = :conversationId")
     suspend fun deleteMessagesForConversation(conversationId: String)
 
+    @Query("DELETE FROM chat_messages")
+    suspend fun clearAllMessages()
+
     @Query("DELETE FROM chat_messages WHERE id = :id")
     suspend fun deleteMessageById(id: Long)
 }

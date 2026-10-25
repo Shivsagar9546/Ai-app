@@ -140,8 +140,9 @@ fun FloatingPopUpView(
     onMaximize: () -> Unit,
     onClose: () -> Unit,
     onDragHeader: (dx: Float, dy: Float) -> Unit,
-    onResize: (dw: Float, dh: Float, dx: Float, dy: Float) -> Unit,
+    onResize: (dw: Float, dh: Float, dx: Float, dy: Float) -> Unit = { _, _, _, _ -> },
     onAlphaChanged: (Float) -> Unit = {},
+    onAlphaChangeFinished: (Float) -> Unit = {},
     initialAlpha: Float = 1.0f,
     externalAttachedBitmap: Bitmap? = null,
     onClearExternalAttachedBitmap: () -> Unit = {}
@@ -399,6 +400,9 @@ fun FloatingPopUpView(
                                 onValueChange = { 
                                     windowAlpha = it
                                     onAlphaChanged(it)
+                                },
+                                onValueChangeFinished = {
+                                    onAlphaChangeFinished(windowAlpha)
                                 },
                                 valueRange = 0.25f..1.0f,
                                 modifier = Modifier

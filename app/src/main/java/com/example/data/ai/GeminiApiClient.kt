@@ -15,11 +15,10 @@ import java.util.concurrent.TimeUnit
 object GeminiModelRegistry {
     val ACTIVE_MODELS = listOf(
         "gemini-3.5-flash",
+        "gemini-flash-latest",
         "gemini-3.1-pro-preview",
-        "gemini-2.5-flash",
         "gemini-3.1-flash-lite-preview",
-        "gemini-2.5-pro",
-        "gemini-flash-latest"
+        "gemini-3.8-flash"
     )
 
     val DEPRECATED_OR_INVALID_MODELS = setOf(
@@ -32,14 +31,17 @@ object GeminiModelRegistry {
         "gemini-2.0-flash",
         "gemini-2.0-pro",
         "gemini-2.0-flash-thinking",
-        "gemini-2.0-flash-lite"
+        "gemini-2.0-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro"
     )
 
     fun isDeprecated(model: String): Boolean {
         val lower = model.trim().lowercase()
         return DEPRECATED_OR_INVALID_MODELS.contains(lower) || 
                lower.startsWith("gemini-1.") || 
-               lower.startsWith("gemini-2.0")
+               lower.startsWith("gemini-2.0") ||
+               lower.startsWith("gemini-2.5")
     }
 
     fun buildFallbackChain(requestedModel: String): List<String> {
@@ -89,34 +91,32 @@ class GeminiApiClient {
             rootJson.put("systemInstruction", sysInst)
         }
 
-        // Contents
+        // Contents with strict role alternation (user -> model -> user)
         val contentsArray = JSONArray()
+        data class Turn(val role: String, val parts: MutableList<JSONObject>)
+        val turns = mutableListOf<Turn>()
+
         messages.forEachIndexed { index, msg ->
-            val contentObj = JSONObject()
+            if (msg.text.startsWith("⚠️") && msg.role.equals("model", ignoreCase = true)) {
+                return@forEachIndexed // skip error notifications from polluting context
+            }
             val isUser = msg.role.equals("user", ignoreCase = true)
-            contentObj.put("role", if (isUser) "user" else "model")
+            val roleStr = if (isUser) "user" else "model"
 
             val messageImages = if (index == messages.lastIndex) {
                 if (allImages.isNotEmpty()) allImages
                 else if (!msg.imageBase64.isNullOrBlank()) listOf(msg.imageBase64)
                 else emptyList()
             } else {
-                // Keep image inline only for immediate preceding turn to avoid payload bloat & OOM
                 if (index >= messages.size - 2 && !msg.imageBase64.isNullOrBlank()) listOf(msg.imageBase64)
                 else emptyList()
             }
 
             val resolvedImages = messageImages.flatMap { imgData ->
-                if (imgData.contains("|")) {
-                    imgData.split("|")
-                } else {
-                    listOf(imgData)
-                }
+                if (imgData.contains("|")) imgData.split("|") else listOf(imgData)
             }.mapNotNull { rawImg ->
                 val imgData = rawImg.trim()
                 if (imgData.isBlank()) return@mapNotNull null
-
-                // A real file path MUST be reasonably short and actually exist on disk
                 val isRealFile = imgData.length <= 1024 && (
                     imgData.startsWith("file://") ||
                     (imgData.startsWith("/") && try {
@@ -124,7 +124,6 @@ class GeminiApiClient {
                         f.exists() && f.isFile
                     } catch (_: Exception) { false })
                 )
-
                 if (isRealFile) {
                     try {
                         val path = imgData.replace("file://", "")
@@ -132,47 +131,60 @@ class GeminiApiClient {
                         if (file.exists() && file.isFile) {
                             val bytes = file.readBytes()
                             android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                        } else {
-                            null
-                        }
-                    } catch (e: Exception) {
-                        null
-                    }
+                        } else null
+                    } catch (_: Exception) { null }
                 } else {
-                    // Already a valid Base64 string! Strip any data URI header if present
-                    if (imgData.contains(",")) {
-                        imgData.substringAfter(",")
-                    } else {
-                        imgData
-                    }
+                    if (imgData.contains(",")) imgData.substringAfter(",") else imgData
                 }
             }
 
-            val partsArray = JSONArray()
             val effectiveText = if (msg.text.isNotBlank()) {
                 msg.text
             } else if (isUser && resolvedImages.isNotEmpty()) {
-                "कृपया इस इमेज को ध्यान से समझें और निम्नलिखित नियमों के अनुसार हल करें:\n1. शुरुआत में 'सही उत्तर है: Option [A/B/C/D] [Value]' लिखें।\n2. केवल जरूरत के अनुसार Step-by-Step point-to-point हल दें।\n3. Physics/Math की सभी equations proper LaTeX में दें (\$ या \$\$) और हर मुख्य गणना अलग line में रखें। कभी भी formula को code block में न डालें।\n4. अंत में 'Final Answer: Option [A/B/C/D] [Value]' दें।\n5. भाषा बहुत सरल Hindi/Hinglish रखें।"
+                "Please analyze this image carefully and provide a comprehensive, accurate, and helpful response. If it contains a question or problem, solve it clearly with the final answer highlighted. If it is an MCQ, state the correct option. Keep the explanation clear, step-by-step, and in natural, easy-to-understand language."
             } else {
                 ""
             }
-            if (effectiveText.isNotBlank()) {
-                partsArray.put(JSONObject().put("text", effectiveText))
-            }
 
+            val currentParts = mutableListOf<JSONObject>()
+            if (effectiveText.isNotBlank()) {
+                currentParts.add(JSONObject().put("text", effectiveText))
+            }
             resolvedImages.forEach { imgData ->
                 if (imgData.isNotBlank()) {
                     val inlineDataObj = JSONObject()
                     inlineDataObj.put("mimeType", "image/jpeg")
                     inlineDataObj.put("data", imgData)
-                    partsArray.put(JSONObject().put("inlineData", inlineDataObj))
+                    currentParts.add(JSONObject().put("inlineData", inlineDataObj))
                 }
             }
 
-            if (partsArray.length() > 0) {
-                contentObj.put("parts", partsArray)
-                contentsArray.put(contentObj)
+            if (currentParts.isNotEmpty()) {
+                if (turns.isNotEmpty() && turns.last().role == roleStr) {
+                    turns.last().parts.addAll(currentParts)
+                } else {
+                    turns.add(Turn(roleStr, currentParts))
+                }
             }
+        }
+
+        // Ensure the conversation starts with a user turn
+        while (turns.isNotEmpty() && turns.first().role != "user") {
+            turns.removeAt(0)
+        }
+
+        if (turns.isEmpty()) {
+            val defaultParts = mutableListOf(JSONObject().put("text", "Hello"))
+            turns.add(Turn("user", defaultParts))
+        }
+
+        turns.forEach { turn ->
+            val contentObj = JSONObject()
+            contentObj.put("role", turn.role)
+            val partsArray = JSONArray()
+            turn.parts.forEach { partsArray.put(it) }
+            contentObj.put("parts", partsArray)
+            contentsArray.put(contentObj)
         }
 
         if (contentsArray.length() == 0) {
@@ -196,7 +208,7 @@ class GeminiApiClient {
         if (isWebSearchEnabled) {
             val toolsArray = JSONArray()
             val googleSearchObj = JSONObject()
-            googleSearchObj.put("google_search_retrieval", JSONObject())
+            googleSearchObj.put("googleSearch", JSONObject())
             toolsArray.put(googleSearchObj)
             rootJson.put("tools", toolsArray)
         }

@@ -744,14 +744,17 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         onAlphaChanged = { newAlpha ->
                             val cleanAlpha = newAlpha.coerceIn(0.25f, 1.0f)
                             savedPopupAlpha = cleanAlpha
-                            serviceScope.launch {
-                                omniApp.adminPreferences.updateSettings(bubbleAlpha = cleanAlpha)
-                            }
                             popupParams?.let { params ->
                                 params.alpha = cleanAlpha
                                 try {
                                     windowManager.updateViewLayout(popupView, params)
-                                } catch (e: Exception) {}
+                                } catch (_: Exception) {}
+                            }
+                        },
+                        onAlphaChangeFinished = { finalAlpha ->
+                            val cleanAlpha = finalAlpha.coerceIn(0.25f, 1.0f)
+                            serviceScope.launch {
+                                omniApp.adminPreferences.updateSettings(bubbleAlpha = cleanAlpha)
                             }
                         },
                         initialAlpha = savedPopupAlpha
@@ -1507,6 +1510,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                     withContext(Dispatchers.IO) {
                         try {
                             app.database.chatDao().insertMessage(modelMsg)
+                            dispatchMicroDeltaSync(convId)
                         } catch (e: Exception) {}
                     }
                 }
@@ -1522,6 +1526,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                     withContext(Dispatchers.IO) {
                         try {
                             app.database.chatDao().insertMessage(errorMsg)
+                            dispatchMicroDeltaSync(convId)
                         } catch (e: Exception) {}
                     }
                 }
@@ -1564,6 +1569,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         withContext(Dispatchers.IO) {
                             try {
                                 app.database.chatDao().insertMessage(modelMsg)
+                                dispatchMicroDeltaSync(convId)
                             } catch (e: Exception) {}
                         }
                     }
@@ -1576,8 +1582,27 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                             timestamp = System.currentTimeMillis()
                         )
                         _messages.value = _messages.value + errorMsg
+                        withContext(Dispatchers.IO) {
+                            try {
+                                app.database.chatDao().insertMessage(errorMsg)
+                                dispatchMicroDeltaSync(convId)
+                            } catch (e: Exception) {}
+                        }
                     }
                 }
+            }
+        }
+    }
+
+    private fun dispatchMicroDeltaSync(convId: String) {
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val app = application as OmniAIApplication
+                val conv = app.database.chatDao().getConversationById(convId) ?: return@launch
+                val messages = app.database.chatDao().getMessagesList(convId)
+                app.firestoreSyncRepository.syncDeltaBatch(conv, messages)
+            } catch (e: Exception) {
+                // Background delta sync is non-blocking and silent
             }
         }
     }
@@ -1625,6 +1650,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         }
     }
 
+    @Suppress("DEPRECATION")
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         if (level >= TRIM_MEMORY_MODERATE) {

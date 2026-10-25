@@ -69,6 +69,7 @@ fun HistoryScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
 
     var conversationToRename by remember { mutableStateOf<Conversation?>(null) }
+    var conversationToDelete by remember { mutableStateOf<Conversation?>(null) }
     var renameText by remember { mutableStateOf("") }
     var showClearConfirmDialog by remember { mutableStateOf(false) }
 
@@ -195,13 +196,38 @@ fun HistoryScreen(
                                 renameText = conv.title
                             },
                             onDelete = {
-                                viewModel.deleteConversation(conv.id)
+                                conversationToDelete = conv
                             }
                         )
                     }
                 }
             }
         }
+    }
+
+    // Individual Delete Confirmation Dialog
+    if (conversationToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { conversationToDelete = null },
+            title = { Text("Delete Conversation?") },
+            text = { Text("Are you sure you want to delete '${conversationToDelete?.title}'? All messages and attachments will be deleted.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        conversationToDelete?.let { viewModel.deleteConversation(it.id) }
+                        conversationToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { conversationToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // Rename Dialog

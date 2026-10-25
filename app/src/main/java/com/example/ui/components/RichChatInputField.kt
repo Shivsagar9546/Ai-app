@@ -88,6 +88,7 @@ class RichContentEditText @JvmOverloads constructor(
         }
     }
 
+    @Suppress("DEPRECATION")
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         val ic = super.onCreateInputConnection(outAttrs) ?: return null
 

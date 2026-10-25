@@ -106,11 +106,11 @@ fun AdminPanelScreen(
     var customModelInput by remember(adminSettings.geminiModel) {
         mutableStateOf(
             if (adminSettings.geminiModel != "auto" &&
-                adminSettings.geminiModel != "gemini-2.5-flash" &&
                 adminSettings.geminiModel != "gemini-3.5-flash" &&
-                adminSettings.geminiModel != "gemini-2.5-pro" &&
+                adminSettings.geminiModel != "gemini-flash-latest" &&
                 adminSettings.geminiModel != "gemini-3.1-pro-preview" &&
-                adminSettings.geminiModel != "gemini-3.1-flash-lite-preview"
+                adminSettings.geminiModel != "gemini-3.1-flash-lite-preview" &&
+                adminSettings.geminiModel != "gemini-3.8-flash"
             ) {
                 adminSettings.geminiModel
             } else {
@@ -499,29 +499,29 @@ fun AdminPanelScreen(
                                     label = { Text("Auto-Detect (Smart 🧠)") }
                                 )
                                 FilterChip(
-                                    selected = adminSettings.geminiModel == "gemini-2.5-flash",
-                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-2.5-flash") },
-                                    label = { Text("gemini-2.5-flash (Ultra ⚡)") }
-                                )
-                                FilterChip(
                                     selected = adminSettings.geminiModel == "gemini-3.5-flash",
                                     onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-3.5-flash") },
-                                    label = { Text("gemini-3.5-flash (Latest 🚀)") }
+                                    label = { Text("gemini-3.5-flash (Fast & Accurate 🚀)") }
                                 )
                                 FilterChip(
-                                    selected = adminSettings.geminiModel == "gemini-2.5-pro",
-                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-2.5-pro") },
-                                    label = { Text("gemini-2.5-pro (Reasoning 🎯)") }
+                                    selected = adminSettings.geminiModel == "gemini-flash-latest",
+                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-flash-latest") },
+                                    label = { Text("gemini-flash-latest (⚡)") }
                                 )
                                 FilterChip(
                                     selected = adminSettings.geminiModel == "gemini-3.1-pro-preview",
                                     onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-3.1-pro-preview") },
-                                    label = { Text("gemini-3.1-pro (Deep 📚)") }
+                                    label = { Text("gemini-3.1-pro (Deep Reasoning 📚)") }
                                 )
                                 FilterChip(
                                     selected = adminSettings.geminiModel == "gemini-3.1-flash-lite-preview",
                                     onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-3.1-flash-lite-preview") },
                                     label = { Text("gemini-3.1-flash-lite (Fast ⚡)") }
+                                )
+                                FilterChip(
+                                    selected = adminSettings.geminiModel == "gemini-3.8-flash",
+                                    onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-3.8-flash") },
+                                    label = { Text("gemini-3.8-flash (Preview 🧪)") }
                                 )
                             }
 
@@ -951,7 +951,7 @@ fun AdminPanelScreen(
                             OutlinedButton(
                                 onClick = {
                                     openRouterKeyInput = ""
-                                    viewModel.updateAdminSettings(openRouterApiKey = "", openRouterModel = "google/gemini-flash-1.5:free")
+                                    viewModel.updateAdminSettings(openRouterApiKey = "", openRouterModel = "meta-llama/llama-3.3-70b-instruct:free")
                                     Toast.makeText(context, "OpenRouter API key removed", Toast.LENGTH_SHORT).show()
                                 },
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),

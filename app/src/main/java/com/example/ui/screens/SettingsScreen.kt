@@ -284,26 +284,47 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
+                    val isErrorState = cloudSyncState.status == com.example.data.firebase.CloudSyncStatus.ERROR || cloudSyncState.isPermissionDenied
+                    val statusContainerColor = if (isErrorState) {
+                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                    } else {
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                    }
+                    val statusIconTint = if (isErrorState) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    }
+
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                        color = statusContainerColor,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = cloudSyncState.message ?: "Personal Cloud Vault ready for backup.",
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isErrorState) Icons.Default.Error else Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = statusIconTint,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = cloudSyncState.message ?: "Personal Cloud Vault ready for backup.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isErrorState) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            if (cloudSyncState.isPermissionDenied) {
+                                Text(
+                                    text = "💡 Fix: Firebase Console > Firestore Database > Rules tab me: 'allow read, write: if true;' daalkar Publish karein.",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
                         }
                     }
 
@@ -420,7 +441,7 @@ fun SettingsScreen(
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            text = "Model: ${if (adminSettings.geminiModel == "auto") "Auto-Detect (gemini-2.5-flash)" else adminSettings.geminiModel}",
+                            text = "Model: ${if (adminSettings.geminiModel == "auto") "Auto-Detect (gemini-3.5-flash)" else adminSettings.geminiModel}",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

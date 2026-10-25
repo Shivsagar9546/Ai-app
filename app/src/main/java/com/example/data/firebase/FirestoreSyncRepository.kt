@@ -7,6 +7,7 @@ import com.example.data.local.ChatMessage
 import com.example.data.local.Conversation
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,7 +27,8 @@ data class CloudSyncState(
     val status: CloudSyncStatus = CloudSyncStatus.IDLE,
     val lastSyncTime: Long? = null,
     val message: String? = null,
-    val displayName: String = "Personal Cloud Storage (Private)"
+    val displayName: String = "Personal Cloud Storage (Private)",
+    val isPermissionDenied: Boolean = false
 )
 
 class FirestoreSyncRepository(private val context: Context) {
@@ -34,6 +36,7 @@ class FirestoreSyncRepository(private val context: Context) {
     companion object {
         private const val PERSONAL_COLLECTION = "personal_backup"
         private const val PERSONAL_DOC = "owner_data"
+        private const val TAG = "FirestoreSync"
     }
 
     private val db: FirebaseFirestore by lazy {
@@ -57,6 +60,16 @@ class FirestoreSyncRepository(private val context: Context) {
         )
     )
     val syncState: StateFlow<CloudSyncState> = _syncState.asStateFlow()
+
+    private fun formatErrorMessage(e: Exception, operation: String): String {
+        return if (e is FirebaseFirestoreException && e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+            Log.w(TAG, "$operation: Firestore rules permission denied on project 'ai-app-a0551'.")
+            "Firestore Permission Denied: Firebase Console (ai-app-a0551) me Rules me read/write allow karein."
+        } else {
+            Log.w(TAG, "$operation failed: ${e.message}")
+            e.localizedMessage ?: "$operation failed"
+        }
+    }
 
     suspend fun backupConversationsToCloud(
         conversations: List<Conversation>,
@@ -117,16 +130,19 @@ class FirestoreSyncRepository(private val context: Context) {
             _syncState.value = _syncState.value.copy(
                 status = CloudSyncStatus.SYNCED,
                 lastSyncTime = System.currentTimeMillis(),
-                message = "Successfully backed up $count conversations to Personal Cloud Firestore"
+                message = "Successfully backed up $count conversations to Personal Cloud Firestore",
+                isPermissionDenied = false
             )
             Result.success(count)
         } catch (e: Exception) {
-            Log.e("FirestoreSync", "Personal backup error", e)
+            val userMsg = formatErrorMessage(e, "Personal backup")
+            val isPerm = e is FirebaseFirestoreException && e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED
             _syncState.value = _syncState.value.copy(
                 status = CloudSyncStatus.ERROR,
-                message = e.localizedMessage ?: "Backup failed"
+                message = userMsg,
+                isPermissionDenied = isPerm
             )
-            Result.failure(e)
+            Result.failure(Exception(userMsg, e))
         }
     }
 
@@ -186,16 +202,189 @@ class FirestoreSyncRepository(private val context: Context) {
             _syncState.value = _syncState.value.copy(
                 status = CloudSyncStatus.SYNCED,
                 lastSyncTime = System.currentTimeMillis(),
-                message = "Successfully restored $count conversations from Personal Cloud Firestore"
+                message = "Successfully restored $count conversations from Personal Cloud Firestore",
+                isPermissionDenied = false
             )
             Result.success(count)
         } catch (e: Exception) {
-            Log.e("FirestoreSync", "Personal restore error", e)
+            val userMsg = formatErrorMessage(e, "Personal restore")
+            val isPerm = e is FirebaseFirestoreException && e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED
             _syncState.value = _syncState.value.copy(
                 status = CloudSyncStatus.ERROR,
-                message = e.localizedMessage ?: "Restore failed"
+                message = userMsg,
+                isPermissionDenied = isPerm
             )
-            Result.failure(e)
+            Result.failure(Exception(userMsg, e))
+        }
+    }
+
+    suspend fun deleteConversationFromCloud(convId: String) = withContext(Dispatchers.IO) {
+        try {
+            val ownerDoc = db.collection(PERSONAL_COLLECTION).document(PERSONAL_DOC)
+            val convRef = ownerDoc.collection("conversations").document(convId)
+            val msgSnapshot = convRef.collection("messages").get().await()
+            val batch = db.batch()
+            for (mDoc in msgSnapshot.documents) {
+                batch.delete(mDoc.reference)
+            }
+            batch.delete(convRef)
+            batch.commit().await()
+            Log.d(TAG, "Deleted conversation $convId from Firestore in batch")
+        } catch (e: Exception) {
+            if (e is FirebaseFirestoreException && e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                Log.w(TAG, "deleteConversationFromCloud skipped: permission denied on remote project")
+            } else {
+                Log.w(TAG, "Error deleting conversation from cloud: $convId: ${e.message}")
+            }
+        }
+    }
+
+    suspend fun clearAllCloudBackup() = withContext(Dispatchers.IO) {
+        try {
+            val ownerDoc = db.collection(PERSONAL_COLLECTION).document(PERSONAL_DOC)
+            val convSnapshot = ownerDoc.collection("conversations").get().await()
+            for (doc in convSnapshot.documents) {
+                val batch = db.batch()
+                val msgSnapshot = doc.reference.collection("messages").get().await()
+                for (mDoc in msgSnapshot.documents) {
+                    batch.delete(mDoc.reference)
+                }
+                batch.delete(doc.reference)
+                batch.commit().await()
+            }
+            ownerDoc.delete().await()
+            _syncState.value = _syncState.value.copy(
+                status = CloudSyncStatus.IDLE,
+                message = "Cloud history cleared completely"
+            )
+            Log.d(TAG, "Cleared all conversations from Firestore")
+        } catch (e: Exception) {
+            if (e is FirebaseFirestoreException && e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                Log.w(TAG, "clearAllCloudBackup skipped: permission denied on remote project")
+            } else {
+                Log.w(TAG, "Error clearing cloud backup: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Micro Delta Batch Sync:
+     * Commits dirty changes in an efficient batch in the background without blocking the UI.
+     */
+    suspend fun syncDeltaBatch(conv: Conversation, messages: List<ChatMessage>) = withContext(Dispatchers.IO) {
+        try {
+            val deltaMessages = if (messages.size > 25) messages.takeLast(25) else messages
+            val batch = db.batch()
+            val ownerDoc = db.collection(PERSONAL_COLLECTION).document(PERSONAL_DOC)
+            batch.set(
+                ownerDoc,
+                mapOf(
+                    "type" to "personal_private_vault",
+                    "lastActiveAt" to FieldValue.serverTimestamp()
+                ),
+                SetOptions.merge()
+            )
+
+            val convRef = ownerDoc.collection("conversations").document(conv.id)
+            batch.set(
+                convRef,
+                mapOf(
+                    "id" to conv.id,
+                    "title" to conv.title,
+                    "createdAt" to conv.createdAt,
+                    "updatedAt" to conv.updatedAt,
+                    "lastMessagePreview" to conv.lastMessagePreview,
+                    "modelUsed" to conv.modelUsed,
+                    "syncedAt" to FieldValue.serverTimestamp()
+                ),
+                SetOptions.merge()
+            )
+
+            for (msg in deltaMessages) {
+                val msgRef = convRef.collection("messages").document(msg.id.toString())
+                batch.set(
+                    msgRef,
+                    mapOf(
+                        "id" to msg.id,
+                        "conversationId" to conv.id,
+                        "role" to msg.role,
+                        "text" to msg.text,
+                        "isScreenScan" to msg.isScreenScan,
+                        "timestamp" to msg.timestamp,
+                        "isStreaming" to false,
+                        "isError" to msg.isError
+                    ),
+                    SetOptions.merge()
+                )
+            }
+
+            batch.commit().await()
+            Log.d(TAG, "Micro delta batch synced successfully for conv ${conv.id} (${deltaMessages.size} messages)")
+        } catch (e: Exception) {
+            if (e is FirebaseFirestoreException && e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                Log.w(TAG, "Micro delta batch sync skipped: Firestore rules permission denied on project ai-app-a0551")
+            } else {
+                Log.w(TAG, "Micro delta batch sync error: ${e.message}")
+            }
+        }
+    }
+
+    suspend fun saveConversationDirectly(conv: Conversation) = withContext(Dispatchers.IO) {
+        try {
+            val ownerDoc = db.collection(PERSONAL_COLLECTION).document(PERSONAL_DOC)
+            ownerDoc.set(
+                mapOf(
+                    "type" to "personal_private_vault",
+                    "lastActiveAt" to FieldValue.serverTimestamp()
+                ),
+                SetOptions.merge()
+            ).await()
+
+            ownerDoc.collection("conversations").document(conv.id).set(
+                mapOf(
+                    "id" to conv.id,
+                    "title" to conv.title,
+                    "createdAt" to conv.createdAt,
+                    "updatedAt" to conv.updatedAt,
+                    "lastMessagePreview" to conv.lastMessagePreview,
+                    "modelUsed" to conv.modelUsed,
+                    "syncedAt" to FieldValue.serverTimestamp()
+                ),
+                SetOptions.merge()
+            ).await()
+        } catch (e: Exception) {
+            if (e is FirebaseFirestoreException && e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                Log.w(TAG, "saveConversationDirectly skipped: permission denied on project ai-app-a0551")
+            } else {
+                Log.w(TAG, "saveConversationDirectly error: ${e.message}")
+            }
+        }
+    }
+
+    suspend fun saveMessageDirectly(convId: String, msg: ChatMessage) = withContext(Dispatchers.IO) {
+        try {
+            val ownerDoc = db.collection(PERSONAL_COLLECTION).document(PERSONAL_DOC)
+            val convRef = ownerDoc.collection("conversations").document(convId)
+            val msgRef = convRef.collection("messages").document(msg.id.toString())
+            msgRef.set(
+                mapOf(
+                    "id" to msg.id,
+                    "conversationId" to convId,
+                    "role" to msg.role,
+                    "text" to msg.text,
+                    "isScreenScan" to msg.isScreenScan,
+                    "timestamp" to msg.timestamp,
+                    "isStreaming" to false,
+                    "isError" to msg.isError
+                ),
+                SetOptions.merge()
+            ).await()
+        } catch (e: Exception) {
+            if (e is FirebaseFirestoreException && e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                Log.w(TAG, "saveMessageDirectly skipped: permission denied on project ai-app-a0551")
+            } else {
+                Log.w(TAG, "saveMessageDirectly error: ${e.message}")
+            }
         }
     }
 }
