@@ -359,6 +359,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
             // Insert user message locally (0ms instant Room persistence)
             val userMsgId = chatDao.insertMessage(userMessage)
+            dispatchMicroDeltaSync(convId)
 
             // Gather context history with imageBase64 preservation
             val history = chatDao.getMessagesList(convId)
@@ -732,8 +733,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val result = firestoreSync.restoreConversationsFromCloud { conv, messages ->
                 chatDao.insertConversation(conv)
+                chatDao.deleteMessagesForConversation(conv.id)
                 for (msg in messages) {
-                    chatDao.insertMessage(msg)
+                    chatDao.insertMessage(msg.copy(id = 0))
                 }
             }
             if (result.isSuccess) {

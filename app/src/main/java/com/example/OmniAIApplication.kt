@@ -23,6 +23,8 @@ class OmniAIApplication : Application() {
         super.onCreate()
         instance = this
 
+        initFirebaseSafely()
+
         database = AppDatabase.getDatabase(this)
         adminPreferences = AdminPreferencesRepository(this)
         firestoreSyncRepository = com.example.data.firebase.FirestoreSyncRepository(this)
@@ -79,6 +81,33 @@ class OmniAIApplication : Application() {
                 }
                 notificationManager.createNotificationChannel(channel)
             } catch (e: Exception) {}
+        }
+    }
+
+    private fun initFirebaseSafely() {
+        try {
+            if (com.google.firebase.FirebaseApp.getApps(this).isEmpty()) {
+                val initialized = try {
+                    com.google.firebase.FirebaseApp.initializeApp(this) != null
+                } catch (e: Exception) {
+                    false
+                }
+                if (!initialized && com.google.firebase.FirebaseApp.getApps(this).isEmpty()) {
+                    val options = com.google.firebase.FirebaseOptions.Builder()
+                        .setApplicationId("1:667106647855:android:2245f2a5b78747b88ccbda")
+                        .setApiKey("AIzaSyBptUTFKvOrCS0OfagKpzOfYWt2YVS8i5E")
+                        .setProjectId("ai-app-a0551")
+                        .setDatabaseUrl("https://ai-app-a0551-default-rtdb.asia-southeast1.firebasedatabase.app")
+                        .setStorageBucket("ai-app-a0551.firebasestorage.app")
+                        .build()
+                    com.google.firebase.FirebaseApp.initializeApp(this, options)
+                    android.util.Log.i("OmniAI", "FirebaseApp initialized with explicit fallback options")
+                } else {
+                    android.util.Log.i("OmniAI", "FirebaseApp auto-initialized successfully")
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("OmniAI", "FirebaseApp safe init error", e)
         }
     }
 

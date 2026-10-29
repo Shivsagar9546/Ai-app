@@ -69,6 +69,16 @@ fun Base64ImageView(
         }
     }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val isActivityContext = remember(context) {
+        var ctx: android.content.Context? = context
+        while (ctx is android.content.ContextWrapper) {
+            if (ctx is android.app.Activity) return@remember true
+            ctx = ctx.baseContext
+        }
+        ctx is android.app.Activity
+    }
+
     if (isFilePath) {
         val cleanPath = remember(base64String) { base64String.replace("file://", "") }
         val imageFile = remember(cleanPath) { File(cleanPath) }
@@ -87,12 +97,23 @@ fun Base64ImageView(
                     .clip(RoundedCornerShape(14.dp))
                     .heightIn(max = 240.dp)
                     .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
-                    .clickable { isViewerOpen = true }
+                    .clickable {
+                        if (isActivityContext) {
+                            isViewerOpen = true
+                        } else {
+                            try {
+                                val intent = android.content.Intent(context, com.example.MainActivity::class.java).apply {
+                                    flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                }
+                                context.startActivity(intent)
+                            } catch (_: Exception) {}
+                        }
+                    }
             )
         }
 
-        // Fullscreen Lightbox / Popup Image Viewer
-        if (isViewerOpen) {
+        // Fullscreen Lightbox / Popup Image Viewer (only in Activity context to prevent BadTokenException)
+        if (isViewerOpen && isActivityContext) {
             Popup(
                 onDismissRequest = { isViewerOpen = false },
                 properties = PopupProperties(
@@ -189,12 +210,23 @@ fun Base64ImageView(
                     .clip(RoundedCornerShape(14.dp))
                     .heightIn(max = 240.dp)
                     .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
-                    .clickable { isViewerOpen = true }
+                    .clickable {
+                        if (isActivityContext) {
+                            isViewerOpen = true
+                        } else {
+                            try {
+                                val intent = android.content.Intent(context, com.example.MainActivity::class.java).apply {
+                                    flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                }
+                                context.startActivity(intent)
+                            } catch (_: Exception) {}
+                        }
+                    }
             )
         }
 
-        // Fullscreen Lightbox / Popup Image Viewer
-        if (isViewerOpen) {
+        // Fullscreen Lightbox / Popup Image Viewer (only in Activity context to prevent BadTokenException)
+        if (isViewerOpen && isActivityContext) {
             Popup(
                 onDismissRequest = { isViewerOpen = false },
                 properties = PopupProperties(

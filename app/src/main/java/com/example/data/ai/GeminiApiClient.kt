@@ -202,7 +202,7 @@ class GeminiApiClient {
         val genConfig = JSONObject()
         genConfig.put("temperature", 0.3)
         genConfig.put("topP", 0.95)
-        genConfig.put("maxOutputTokens", 4096)
+        genConfig.put("maxOutputTokens", 8192)
         rootJson.put("generationConfig", genConfig)
 
         if (isWebSearchEnabled) {

@@ -1327,6 +1327,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         )
                     )
                     app.database.chatDao().insertMessage(userMsg)
+                    dispatchMicroDeltaSync(convId)
                 } catch (e: Exception) {}
             }
 
@@ -1363,6 +1364,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                     withContext(Dispatchers.IO) {
                         try {
                             app.database.chatDao().insertMessage(modelMsg)
+                            dispatchMicroDeltaSync(convId)
                         } catch (e: Exception) {}
                     }
                 }
@@ -1378,6 +1380,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                     withContext(Dispatchers.IO) {
                         try {
                             app.database.chatDao().insertMessage(errorMsg)
+                            dispatchMicroDeltaSync(convId)
                         } catch (e: Exception) {}
                     }
                 }
@@ -1468,6 +1471,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         )
                     )
                     app.database.chatDao().insertMessage(userMsg)
+                    dispatchMicroDeltaSync(convId)
                 } catch (e: Exception) {}
             }
 
@@ -1535,8 +1539,20 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     }
 
     fun clearChat() {
+        val oldConvId = _currentConversationId.value
         _messages.value = emptyList()
         _currentConversationId.value = java.util.UUID.randomUUID().toString()
+
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val app = application as OmniAIApplication
+                app.database.chatDao().deleteMessagesForConversation(oldConvId)
+                app.database.chatDao().deleteConversation(oldConvId)
+                app.firestoreSyncRepository.deleteConversationFromCloud(oldConvId)
+            } catch (e: Exception) {
+                // Non-blocking safe cleanup
+            }
+        }
     }
 
     fun regenerateLastResponse() {
