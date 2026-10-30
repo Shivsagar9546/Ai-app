@@ -72,6 +72,7 @@ import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -330,6 +331,99 @@ fun MainChatScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
+            val isKeyMissing = adminSettings.getActiveGeminiApiKeys().isEmpty() &&
+                    (com.example.BuildConfig.GEMINI_API_KEY.isBlank() || com.example.BuildConfig.GEMINI_API_KEY == "MY_GEMINI_API_KEY")
+
+            var showQuickApiKeyDialog by remember { mutableStateOf(false) }
+            var quickApiKeyInput by remember(adminSettings.geminiApiKey) { mutableStateOf(adminSettings.geminiApiKey) }
+
+            if (showQuickApiKeyDialog) {
+                AlertDialog(
+                    onDismissRequest = { showQuickApiKeyDialog = false },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(imageVector = Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Text("Gemini API Key Setup")
+                        }
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "Enter your free Google Gemini API key to enable instant chat, screen problem solving, and floating assistant.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            OutlinedTextField(
+                                value = quickApiKeyInput,
+                                onValueChange = { quickApiKeyInput = it },
+                                label = { Text("Gemini API Key") },
+                                placeholder = { Text("AIzaSy...") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().testTag("quick_api_key_input")
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (quickApiKeyInput.isNotBlank()) {
+                                    viewModel.updateAdminSettings(geminiApiKey = quickApiKeyInput.trim())
+                                    Toast.makeText(context, "API Key saved successfully!", Toast.LENGTH_SHORT).show()
+                                }
+                                showQuickApiKeyDialog = false
+                            },
+                            modifier = Modifier.testTag("quick_api_key_save_button")
+                        ) {
+                            Text("Save & Activate")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showQuickApiKeyDialog = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
+
+            if (isKeyMissing) {
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showQuickApiKeyDialog = true }
+                        .testTag("quick_api_key_missing_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Key,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Gemini API key setup required to chat. Tap here.",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+                        Text(
+                            text = "Setup 🔑",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+
             // Status bar message (e.g. "Screen frame capturing...")
                 AnimatedVisibility(visible = statusMessage != null) {
                     Surface(

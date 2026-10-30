@@ -3,6 +3,8 @@ package com.example.ui.screens
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import com.example.R
+import com.example.util.PermissionHelper
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -125,7 +127,7 @@ fun ScreenAssistantHubScreen(
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
-    var hasOverlayPermission by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
+    var hasOverlayPermission by remember { mutableStateOf(PermissionHelper.isOverlayGranted(context)) }
     val isServiceRunning by FloatingAssistantService.isRunningFlow.collectAsState()
 
     val adminSettings by viewModel.adminSettings.collectAsState()
@@ -146,7 +148,11 @@ fun ScreenAssistantHubScreen(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                hasOverlayPermission = Settings.canDrawOverlays(context)
+                val granted = PermissionHelper.isOverlayGranted(context)
+                if (granted && (!hasOverlayPermission || !FloatingAssistantService.isRunning())) {
+                    startFloatingService(context)
+                }
+                hasOverlayPermission = granted
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -248,9 +254,9 @@ fun ScreenAssistantHubScreen(
                             checked = isServiceRunning,
                             onCheckedChange = { enable ->
                                 if (enable) {
-                                    if (!Settings.canDrawOverlays(context)) {
+                                    if (!PermissionHelper.isOverlayGranted(context)) {
                                         Toast.makeText(context, "Please grant 'Display over other apps' permission first", Toast.LENGTH_LONG).show()
-                                        requestOverlayPermission(context)
+                                        PermissionHelper.openOverlaySettings(context)
                                     } else {
                                         startFloatingService(context)
                                     }
@@ -272,40 +278,185 @@ fun ScreenAssistantHubScreen(
                         )
                     }
 
-                    if (!hasOverlayPermission) {
-                        Spacer(modifier = Modifier.height(14.dp))
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            modifier = Modifier.fillMaxWidth()
+                    // Overlay Permission Setup
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (hasOverlayPermission) 
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) 
+                        else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (hasOverlayPermission)
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            else MaterialTheme.colorScheme.error
+                        ),
+                        modifier = Modifier.fillMaxWidth().testTag("permissions_diagnostics_card")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (hasOverlayPermission) Icons.Default.CheckCircle else Icons.Default.Security,
+                                        contentDescription = null,
+                                        tint = if (hasOverlayPermission) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        text = "Display over other apps",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = if (hasOverlayPermission) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+
+                                if (hasOverlayPermission) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Active",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+
+                            if (!hasOverlayPermission) {
                                 Text(
-                                    text = "⚠️ Permission Required",
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onErrorContainer
-                                )
-                                Text(
-                                    text = "To show the floating bubble and Samsung Pop-up window over YouTube, WhatsApp, or games, please grant 'Display over other apps' permission.",
+                                    text = "Floating chat aur screen AI chalane ke liye switch ON karein.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onErrorContainer
                                 )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Button(
-                                    onClick = { requestOverlayPermission(context) },
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.error
-                                    ),
-                                    modifier = Modifier.testTag("grant_overlay_permission_button")
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Text("Grant Overlay Permission")
+                                    Button(
+                                        onClick = { PermissionHelper.openOverlaySettings(context) },
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                        modifier = Modifier.weight(1f).testTag("grant_overlay_permission_button")
+                                    ) {
+                                        Text("1. Turn ON Switch", fontSize = 12.sp)
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { PermissionHelper.openAppDetails(context) },
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.weight(1f).testTag("open_app_info_restricted_button")
+                                    ) {
+                                        Text("2. If Grayed: Unlock (3-Dots)", fontSize = 12.sp)
+                                    }
                                 }
                             }
                         }
                     }
 
+                    // Quick Settings Notification Bar Tile Info & Shortcut
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.25f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .background(
+                                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f),
+                                            CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.SmartToy,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Notification Bar Shortcut (Quick Tile)",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Top status bar se 'OmniAI Chat' ko tap karke turant bina app khole floating chat open karein.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
 
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                Button(
+                                    onClick = {
+                                        try {
+                                            val sbm = context.getSystemService(android.app.StatusBarManager::class.java)
+                                            sbm?.requestAddTileService(
+                                                android.content.ComponentName(context, com.example.service.OmniAiQuickSettingsTileService::class.java),
+                                                context.getString(R.string.qs_tile_omni_ai),
+                                                android.graphics.drawable.Icon.createWithResource(context, R.drawable.ic_qs_omni_ai),
+                                                ContextCompat.getMainExecutor(context)
+                                            ) { resultCode ->
+                                                if (resultCode == android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED) {
+                                                    Toast.makeText(context, "Tile added to Quick Settings!", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Swipe down status bar and tap '+' to add tile", Toast.LENGTH_LONG).show()
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.secondary
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("add_qs_tile_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Add to Quick Settings Panel (1-Tap)")
+                                }
+                            } else {
+                                Text(
+                                    text = "👉 Kaise lagayein: Phone ke top se neeche swipe karein > '+' icon par tap karein > 'OmniAI Chat' ko add karein.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
@@ -808,9 +959,9 @@ fun ScreenAssistantHubScreen(
 
             Button(
                 onClick = {
-                    if (!Settings.canDrawOverlays(context)) {
+                    if (!PermissionHelper.isOverlayGranted(context)) {
                         Toast.makeText(context, "Please grant 'Display over other apps' permission first", Toast.LENGTH_LONG).show()
-                        requestOverlayPermission(context)
+                        PermissionHelper.openOverlaySettings(context)
                     } else {
                         startFloatingService(context)
                     }
@@ -837,35 +988,15 @@ private fun startFloatingService(context: Context) {
         val intent = Intent(context, FloatingAssistantService::class.java).apply {
             action = FloatingAssistantService.ACTION_SHOW_BUBBLE
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
-        }
-        Toast.makeText(context, "Floating Assistant Bubble started!", Toast.LENGTH_SHORT).show()
+        context.startService(intent)
+        Toast.makeText(context, "Floating Assistant started!", Toast.LENGTH_SHORT).show()
     } catch (e: Exception) {
-        try {
-            val intent = Intent(context, FloatingAssistantService::class.java).apply {
-                action = FloatingAssistantService.ACTION_SHOW_BUBBLE
-            }
-            context.startService(intent)
-            Toast.makeText(context, "Floating Assistant Bubble started!", Toast.LENGTH_SHORT).show()
-        } catch (ex: Exception) {
-            Toast.makeText(context, "Failed to start service: ${ex.localizedMessage}", Toast.LENGTH_LONG).show()
-        }
+        Toast.makeText(context, "Failed to start service: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
     }
 }
 
 private fun requestOverlayPermission(context: Context) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-        val intent = Intent(
-            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            Uri.parse("package:${context.packageName}")
-        ).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
-    }
+    PermissionHelper.openOverlaySettings(context)
 }
 
 @Composable

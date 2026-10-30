@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">OmniAI</string>
+    <string name="qs_tile_omni_ai">OmniAI Chat</string>
 </resources>

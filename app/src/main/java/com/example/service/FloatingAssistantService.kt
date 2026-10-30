@@ -194,7 +194,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         updateScreenDimensions()
         activeServiceInstance = this
 
-        startForegroundServiceNotification()
+        dismissNotificationCompletely()
     }
 
     override fun onInit(status: Int) {
@@ -226,45 +226,6 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         }
     }
 
-    private fun ensureNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = android.app.NotificationChannel(
-                OmniAIApplication.CHANNEL_FLOATING_SERVICE,
-                "Floating Assistant (Silent)",
-                android.app.NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Silent background channel for floating assistant"
-                setShowBadge(false)
-                enableLights(false)
-                enableVibration(false)
-                setSound(null, null)
-            }
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-            nm.createNotificationChannel(channel)
-        }
-    }
-
-    private fun startForegroundServiceNotification() {
-        ensureNotificationChannel()
-        val notification = createForegroundNotification()
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
-        } catch (e: Exception) {
-            try {
-                startForeground(NOTIFICATION_ID, notification)
-            } catch (e2: Exception) {}
-        }
-    }
-
     private fun dismissNotificationCompletely() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -279,22 +240,36 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         } catch (e: Exception) {}
     }
 
+
+
     private fun createForegroundNotification(): Notification {
-        val openIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        // Tapping notification opens floating chat directly without opening full app
+        val chatIntent = Intent(this, FloatingAssistantService::class.java).apply {
+            action = ACTION_CHAT
         }
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, openIntent,
+        val chatPendingIntent = PendingIntent.getService(
+            this, 101, chatIntent,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+        )
+
+        // Turn Off button to dismiss notification and stop service immediately
+        val stopIntent = Intent(this, FloatingAssistantService::class.java).apply {
+            action = ACTION_STOP_SERVICE
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this, 102, stopIntent,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
         )
 
         return NotificationCompat.Builder(this, OmniAIApplication.CHANNEL_FLOATING_SERVICE)
-            .setContentTitle("OmniAI Assistant")
-            .setContentText("Floating Assistant Active")
+            .setContentTitle("OmniAI Assistant Active")
+            .setContentText("Tap to open floating chat")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setContentIntent(pendingIntent)
+            .setContentIntent(chatPendingIntent)
+            .addAction(0, "Open Chat", chatPendingIntent)
+            .addAction(0, "Turn Off", stopPendingIntent)
             .setOngoing(true)
             .setSilent(true)
             .build()
@@ -318,16 +293,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
 
     fun demoteFromMediaProjectionFgs() {
         try {
-            val notification = createForegroundNotification()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
+            dismissNotificationCompletely()
         } catch (e: Exception) {}
     }
 
@@ -369,8 +335,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
 
         isExplicitStop = false
 
-        // CRITICAL: Call startForeground immediately to avoid ForegroundServiceDidNotStartInTimeException
-        startForegroundServiceNotification()
+        dismissNotificationCompletely()
 
         when (intent?.action) {
             ACTION_CROP -> {
@@ -398,7 +363,10 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
 
     @SuppressLint("ClickableViewAccessibility")
     fun showBubble() {
-        if (!Settings.canDrawOverlays(this)) return
+        if (!Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "Please allow 'Display over other apps' permission", Toast.LENGTH_LONG).show()
+            return
+        }
         hidePopup()
         hideCropOverlay()
         hideOcrGrabber()
@@ -775,6 +743,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             } catch (_: Throwable) {}
         }
     }
+
+    val isPopupShowing: Boolean
+        get() = popupView != null && popupView?.visibility == View.VISIBLE
 
     fun minimizePopup() {
         hidePopup()
@@ -1541,7 +1512,11 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     fun clearChat() {
         val oldConvId = _currentConversationId.value
         _messages.value = emptyList()
+        _attachedImage.value = null
+        _statusText.value = null
         _currentConversationId.value = java.util.UUID.randomUUID().toString()
+
+        Toast.makeText(this, "Chat history cleared", Toast.LENGTH_SHORT).show()
 
         serviceScope.launch(Dispatchers.IO) {
             try {
@@ -1688,11 +1663,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                 action = ACTION_SHOW_BUBBLE
             }
             val flags = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0) or PendingIntent.FLAG_UPDATE_CURRENT
-            val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                PendingIntent.getForegroundService(applicationContext, 999, restartIntent, flags)
-            } else {
-                PendingIntent.getService(applicationContext, 999, restartIntent, flags)
-            }
+            val pendingIntent = PendingIntent.getService(applicationContext, 999, restartIntent, flags)
             val alarmMgr = getSystemService(Context.ALARM_SERVICE) as? AlarmManager
             alarmMgr?.set(
                 AlarmManager.ELAPSED_REALTIME,

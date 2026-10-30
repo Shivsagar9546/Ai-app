@@ -57,6 +57,16 @@ class MainActivity : ComponentActivity() {
         }
         navTargetState.value = initialNavTarget
 
+        if (intent?.getBooleanExtra("AUTO_LAUNCH_CHAT", false) == true) {
+            val serviceIntent = Intent(this, com.example.service.FloatingAssistantService::class.java).apply {
+                action = com.example.service.FloatingAssistantService.ACTION_CHAT
+            }
+            try {
+                startService(serviceIntent)
+                moveTaskToBack(true)
+            } catch (e: Exception) {}
+        }
+
         handleIncomingIntent(intent)
 
         setContent {

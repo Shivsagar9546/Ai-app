@@ -6,8 +6,15 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.util.PermissionHelper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,6 +58,7 @@ import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -99,6 +107,21 @@ fun SettingsScreen(
     val cloudSyncState by viewModel.cloudSyncState.collectAsState()
     var isCloudBackingUp by remember { mutableStateOf(false) }
     var isCloudRestoring by remember { mutableStateOf(false) }
+
+    var hasOverlayPermission by remember { mutableStateOf(PermissionHelper.isOverlayGranted(context)) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasOverlayPermission = PermissionHelper.isOverlayGranted(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
 
     if (showApiKeyDialog) {
@@ -364,6 +387,93 @@ fun SettingsScreen(
                             Icon(imageVector = Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(if (isCloudRestoring) "Restoring..." else "Restore")
+                        }
+                    }
+                }
+            }
+
+            // System Permissions & App Health
+            Text(
+                text = "System Permissions & Device Access",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground
+            )
+
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = if (hasOverlayPermission)
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (hasOverlayPermission)
+                        MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                    else MaterialTheme.colorScheme.error
+                ),
+                modifier = Modifier.fillMaxWidth().testTag("settings_permissions_card")
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Overlay Permission
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Display Over Other Apps (Overlay)",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                            Text(
+                                text = if (hasOverlayPermission) "Active • Floating Window Allowed" else "Required for Floating Bubble & Chat Window",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (hasOverlayPermission) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+
+                        if (!hasOverlayPermission) {
+                            Button(
+                                onClick = { PermissionHelper.openOverlaySettings(context) },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Text("Enable", fontSize = 12.sp)
+                            }
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = "Active",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    if (!hasOverlayPermission) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "Agar switch off/grayed out hai (Restricted Setting):",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Text(
+                                    text = "App Info khol kar upar 3-Dots (⋮) se 'Allow restricted settings' karein.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    lineHeight = 16.sp
+                                )
+                                OutlinedButton(
+                                    onClick = { PermissionHelper.openAppDetails(context) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Open App Info (3-Dots Unlock)", fontSize = 12.sp)
+                                }
+                            }
                         }
                     }
                 }
